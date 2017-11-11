@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/vmihailenco/msgpack"
@@ -26,6 +27,7 @@ const (
 type Callback func(val Packet, err error)
 
 type Node struct {
+	sync.RWMutex
 	contact      PacketContact
 	lastSeen     int64
 	socket       *bufio.ReadWriter
@@ -180,7 +182,9 @@ func (this *Node) loop() {
 			}
 
 			if len(packet.Header.ResponseTo) > 0 {
+				this.Lock()
 				cb, ok := this.commandQueue[packet.Header.ResponseTo]
+				this.Unlock()
 
 				if !ok {
 					this.dht.logger.Error(this, "x Unknown response: ", packet.Header.ResponseTo)
@@ -202,7 +206,9 @@ func (this *Node) loop() {
 					continue
 				}
 
+				this.Lock()
 				delete(this.commandQueue, packet.Header.ResponseTo)
+				this.Unlock()
 			} else {
 				switch packet.Header.Command {
 				case COMMAND_PING:
@@ -381,17 +387,21 @@ func (this *Node) send(packet Packet, done Callback) {
 
 	timer := time.NewTimer(time.Second * 5)
 
+	this.Lock()
 	this.commandQueue[packet.Header.MessageHash] = func(v Packet, err error) {
 		timer.Stop()
 
 		done(v, err)
 	}
+	this.Unlock()
 
 	go func() {
 		<-timer.C
 		done(packet, errors.New(this.contact.Hash[:16]+" Timeout"))
 
+		this.Lock()
 		delete(this.commandQueue, packet.Header.MessageHash)
+		this.Unlock()
 	}()
 
 	this.socket.Flush()

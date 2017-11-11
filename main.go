@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/champii/dht-custom/dht"
+	"github.com/champii/go-dht/dht"
 	"github.com/urfave/cli"
 )
 
@@ -153,8 +153,6 @@ func cluster(count int, options dht.DhtOptions) {
 		dht := dht.New(options2)
 
 		go dht.Start()
-
-		time.Sleep(time.Second * 2)
 
 		network = append(network, dht)
 	}

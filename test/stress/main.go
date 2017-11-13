@@ -67,7 +67,7 @@ func launchNetwork(size int) []*dht.Dht {
 
 		net = append(net, node)
 
-		time.Sleep(time.Millisecond * 200)
+		time.Sleep(time.Millisecond * 400)
 	}
 
 	return net

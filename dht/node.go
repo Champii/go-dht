@@ -361,6 +361,20 @@ func (this *Node) OnStore(packet Packet) {
 	this.dht.logger.Debug(this, "> STORE", packet.Data.(StoreInst).Hash, packet.Data.(StoreInst).Data)
 
 	// todo: check if best eligible
+	ok, bucket := this.dht.routing.IsBestStorage(packet.Data.(StoreInst).Hash)
+
+	if !ok {
+		var nodesContact []PacketContact
+
+		for _, node := range bucket {
+			nodesContact = append(nodesContact, node.contact)
+		}
+
+		this.FoundNodes(packet, nodesContact)
+
+		return
+	}
+
 	this.dht.store[packet.Data.(StoreInst).Hash] = packet.Data.(StoreInst).Data
 
 	this.Stored(packet)

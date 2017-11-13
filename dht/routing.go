@@ -194,3 +194,22 @@ func (this *Routing) GetNode(hash string) *Node {
 
 	return nil
 }
+
+func (this *Routing) IsBestStorage(hash string) (bool, []*Node) {
+	bucket := this.FindNode(hash)
+
+	dist1 := this.distanceBetwin(this.dht.hash, hash)
+	smalest := dist1
+	for _, node := range bucket {
+		dist2 := this.distanceBetwin(node.contact.Hash, hash)
+		if dist2 < smalest {
+			smalest = dist2
+		}
+	}
+
+	if dist1 > smalest {
+		return false, bucket
+	}
+
+	return true, []*Node{}
+}

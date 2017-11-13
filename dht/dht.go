@@ -107,64 +107,38 @@ func (this *Dht) Store(value interface{}) (string, error) {
 
 	hash := NewHash(buf.Bytes())
 
-	foundNodes, err := this.fetchNodes(hash)
+	fn := func(node *Node) chan interface{} {
+		return node.Store(hash, value)
+	}
+
+	_, _, err = this.fetchNodes(hash, fn)
 
 	if err != nil {
 		return "", err
-	}
-
-	errored := 0
-
-	for _, node := range foundNodes {
-		promise := node.Store(hash, value)
-
-		res := <-promise
-		switch (res).(type) {
-		case error:
-			errored++
-		default:
-		}
-	}
-
-	if errored == len(foundNodes) || len(foundNodes) == 0 {
-		return "", errors.New("Store: no found nodes")
 	}
 
 	return hash, nil
 }
 
 func (this *Dht) Fetch(hash string) (interface{}, error) {
-	bucket := this.routing.FindNode(hash)
+	// bucket := this.routing.FindNode(hash)
 
-	bucket, err := this.fetchNodes(hash)
+	fn := func(node *Node) chan interface{} {
+		return node.Fetch(hash)
+	}
+
+	_, res, err := this.fetchNodes(hash, fn)
+
 	if err != nil {
 		return nil, err
 	}
 
-	errored := 0
-
-	for _, n := range bucket {
-		promise := n.Fetch(hash)
-		res := <-promise
-
-		switch res.(type) {
-		case error:
-			errored++
-		case Packet:
-			if res.(Packet).Header.Command == COMMAND_FOUND {
-				return res.(Packet).Data, nil
-			}
-		default:
-		}
-
-	}
-
-	return nil, errors.New("Not found")
+	return res, nil
 }
 
-func (this *Dht) processFoundBucket(hash string, foundNodes []PacketContact, best []*Node, blacklist []*Node) ([]*Node, error) {
+func (this *Dht) processFoundBucket(hash string, foundNodes []PacketContact, best []*Node, blacklist []*Node, nodeFn func(*Node) chan interface{}) ([]*Node, interface{}, error) {
 	if len(foundNodes) == 0 {
-		return this.performConnectToAll(hash, foundNodes, best, blacklist)
+		return this.performConnectToAll(hash, foundNodes, best, blacklist, nodeFn)
 	}
 
 	foundNodes = this.filter(foundNodes, func(n PacketContact) bool {
@@ -180,7 +154,7 @@ func (this *Dht) processFoundBucket(hash string, foundNodes []PacketContact, bes
 	})
 
 	if len(foundNodes) == 0 {
-		return best, nil
+		return best, nil, nil
 	}
 
 	lowestDistanceInBest := -1
@@ -200,38 +174,42 @@ func (this *Dht) processFoundBucket(hash string, foundNodes []PacketContact, bes
 	// }
 
 	if len(foundNodes) == 0 {
-		return best, nil
+		return best, nil, nil
 	}
 
-	return this.performConnectToAll(hash, foundNodes, best, blacklist)
+	return this.performConnectToAll(hash, foundNodes, best, blacklist, nodeFn)
 }
 
-func (this *Dht) fetchNodes(hash string) ([]*Node, error) {
-	return this.fetchNodes_(hash, this.routing.FindNode(hash), []*Node{}, []*Node{})
+func (this *Dht) fetchNodes(hash string, nodeFn func(*Node) chan interface{}) ([]*Node, interface{}, error) {
+	return this.fetchNodes_(hash, this.routing.FindNode(hash), []*Node{}, []*Node{}, nodeFn)
 }
 
-func (this *Dht) fetchNodes_(hash string, bucket []*Node, best []*Node, blacklist []*Node) ([]*Node, error) {
+func (this *Dht) fetchNodes_(hash string, bucket []*Node, best []*Node, blacklist []*Node, nodeFn func(*Node) chan interface{}) ([]*Node, interface{}, error) {
 	var foundNodes []PacketContact
 
 	if len(bucket) == 0 {
-		return best, nil
+		return best, nil, nil
 	}
 
 	for _, node := range bucket {
-		promise := node.FetchNodes(hash)
-
-		res := <-promise
+		res := <-nodeFn(node)
 
 		switch res.(type) {
 		case error:
-			return []*Node{}, res.(error)
+			return []*Node{}, nil, res.(error)
 		case Packet:
-			foundNodes = append(foundNodes, res.(Packet).Data.([]PacketContact)...)
+			if res.(Packet).Header.Command == COMMAND_FOUND {
+				return []*Node{}, res.(Packet).Data, nil
+			}
+			switch res.(Packet).Data.(type) {
+			case []PacketContact:
+				foundNodes = append(foundNodes, res.(Packet).Data.([]PacketContact)...)
+			}
 		default:
 		}
 	}
 
-	return this.processFoundBucket(hash, foundNodes, best, blacklist)
+	return this.processFoundBucket(hash, foundNodes, best, blacklist, nodeFn)
 }
 
 func (this *Dht) contains(bucket []*Node, node PacketContact) bool {
@@ -256,11 +234,11 @@ func (this *Dht) filter(bucket []PacketContact, fn func(PacketContact) bool) []P
 	return res
 }
 
-func (this *Dht) performConnectToAll(hash string, foundNodes []PacketContact, best []*Node, blacklist []*Node) ([]*Node, error) {
+func (this *Dht) performConnectToAll(hash string, foundNodes []PacketContact, best []*Node, blacklist []*Node, nodeFn func(*Node) chan interface{}) ([]*Node, interface{}, error) {
 	connectedNodes, err := this.connectToAll(foundNodes)
 
 	if err != nil {
-		return []*Node{}, err
+		return []*Node{}, nil, err
 	}
 
 	blacklist = append(blacklist, connectedNodes...)
@@ -273,7 +251,7 @@ func (this *Dht) performConnectToAll(hash string, foundNodes []PacketContact, be
 
 	best = append(best, connectedNodes...)[:smalest]
 
-	return this.fetchNodes_(hash, connectedNodes, best, blacklist)
+	return this.fetchNodes_(hash, connectedNodes, best, blacklist, nodeFn)
 }
 
 func (this *Dht) connectToAll(foundNodes []PacketContact) ([]*Node, error) {
@@ -328,7 +306,11 @@ func (this *Dht) bootstrap() error {
 		return err
 	}
 
-	_, err := this.fetchNodes(this.hash)
+	fn := func(node *Node) chan interface{} {
+		return node.FetchNodes(this.hash)
+	}
+
+	_, _, err := this.fetchNodes(this.hash, fn)
 
 	if err != nil {
 		return err

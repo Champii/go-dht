@@ -4,10 +4,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
-	"os"
+	"sync"
 )
 
 type Routing struct {
+	sync.RWMutex
 	buckets [][]*Node
 	dht     *Dht
 }
@@ -21,6 +22,9 @@ func NewRouting() *Routing {
 }
 
 func (this *Routing) Print() {
+	this.RLock()
+	defer this.RUnlock()
+
 	for i, bucket := range this.buckets {
 		for _, node := range bucket {
 			if node != nil {
@@ -28,9 +32,13 @@ func (this *Routing) Print() {
 			}
 		}
 	}
+
 }
 
 func (this *Routing) Size() int {
+	this.RLock()
+	defer this.RUnlock()
+
 	count := 0
 
 	for _, bucket := range this.buckets {
@@ -90,39 +98,68 @@ func (this *Routing) AddNode(node *Node) {
 		return
 	}
 
+	this.Lock()
 	this.buckets[bucketNb] = append(this.buckets[bucketNb], node)
+	this.Unlock()
+
 	this.dht.logger.Debug(node, "+ Add Routing. Size: ", this.Size())
 }
 
 func (this *Routing) RemoveNode(node *Node) {
+
 	bucketNb := this.countSameBit(node.contact.Hash)
+
+	size := this.Size() - 1
+
+	this.Lock()
+	defer this.Unlock()
 
 	for i, n := range this.buckets[bucketNb] {
 		if n.contact.Hash == node.contact.Hash {
-			this.buckets[bucketNb] = append(this.buckets[bucketNb][:i], this.buckets[bucketNb][i+1:]...)
+			if i == 0 {
+				this.buckets[bucketNb] = this.buckets[bucketNb][1:]
+			} else if i == len(this.buckets[bucketNb])-1 {
+				this.buckets[bucketNb] = this.buckets[bucketNb][:i]
+			} else {
+				this.buckets[bucketNb] = append(this.buckets[bucketNb][:i], this.buckets[bucketNb][i+1:]...)
+			}
 
-			this.dht.logger.Debug(node, "- Del Routing. Size: ", this.Size())
+			this.dht.logger.Debug(node, "- Del Routing. Size: ", size)
 
-			if this.Size() == 0 && len(this.dht.options.BootstrapAddr) != 0 {
-				this.dht.logger.Critical("Empty routing table. Exiting.")
-				os.Exit(1)
+			if size == 0 && len(this.dht.options.BootstrapAddr) != 0 {
+				this.dht.logger.Critical("Empty routing table. Stoping.")
+
+				this.dht.Stop()
 			}
 
 			return
 		}
 	}
 
-	this.dht.logger.Error(node, "x Cannot find node")
+	this.dht.logger.Warning(node, "x Cannot find node")
 }
 
 func (this *Routing) FindNode(hash string) []*Node {
 	res := []*Node{}
+
+	if this.Size() < BUCKET_SIZE {
+		for bucketNb := 0; bucketNb < BUCKET_SIZE; bucketNb++ {
+			for _, node := range this.buckets[bucketNb] {
+				res = append(res, node)
+			}
+		}
+
+		return res
+	}
 
 	bucketNb := this.countSameBit(hash)
 
 	if bucketNb == HASH_SIZE {
 		bucketNb--
 	}
+
+	this.RLock()
+	defer this.RUnlock()
 
 	for len(res) < BUCKET_SIZE && bucketNb < HASH_SIZE && bucketNb >= 0 {
 		for _, node := range this.buckets[bucketNb] {
@@ -145,6 +182,9 @@ func (this *Routing) GetNode(hash string) *Node {
 	if bucketNb == HASH_SIZE {
 		return nil
 	}
+
+	this.RLock()
+	defer this.RUnlock()
 
 	for _, node := range this.buckets[bucketNb] {
 		if node.contact.Hash == hash {

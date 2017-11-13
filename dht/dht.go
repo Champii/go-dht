@@ -2,6 +2,8 @@ package dht
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/gob"
 	"errors"
 	"net"
 	"os"
@@ -16,6 +18,8 @@ type Dht struct {
 	running bool
 	store   map[string]interface{}
 	logger  *logging.Logger
+	server  net.Listener
+	Ready   chan error
 }
 
 type DhtOptions struct {
@@ -24,6 +28,7 @@ type DhtOptions struct {
 	Verbose       int
 	Stats         bool
 	Interactif    bool
+	OnStore       func()
 }
 
 func New(options DhtOptions) *Dht {
@@ -79,86 +84,71 @@ func initLogger(dht *Dht) {
 	logging.SetBackend(backendLeveled)
 }
 
-func (this *Dht) Store(hash string, value interface{}, cb func(count int, err error)) {
-	bucket := this.routing.FindNode(hash)
+func (this *Dht) Store(value interface{}) (string, error) {
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	err := enc.Encode(value)
 
-	this.fetchNodes(hash, bucket, []*Node{}, []*Node{}, func(foundNodes []*Node, err error) {
-		if err != nil {
-			cb(0, err)
+	hash := NewHash(buf.Bytes())
 
-			return
-		}
+	foundNodes, err := this.fetchNodes(hash)
 
-		answer := 0
+	if err != nil {
+		return "", err
+	}
 
-		for _, node := range foundNodes {
-			node.Store(hash, value, func(val Packet, err error) {
-				answer++
-				if err != nil {
-					cb(0, err)
+	errored := 0
 
-					return
-				}
+	for _, node := range foundNodes {
+		promise := node.Store(hash, value)
 
-				if answer == len(foundNodes) {
-					cb(answer, err)
-				}
-			})
-		}
-	})
-}
-
-func (this *Dht) Fetch(hash string, done_ func(interface{}, error)) {
-	called := false
-
-	done := func(v interface{}, err error) {
-		if !called {
-			called = true
-			done_(v, err)
+		res := <-promise
+		switch (res).(type) {
+		case error:
+			errored++
+		default:
 		}
 	}
 
-	bucket := this.routing.FindNode(hash)
-	this.fetchNodes(hash, bucket, []*Node{}, []*Node{}, func(bucket []*Node, err error) {
-		if err != nil {
-			done(nil, err)
+	if errored == len(foundNodes) || len(foundNodes) == 0 {
+		return "", errors.New("Store: no found nodes")
+	}
 
-			return
-		}
-
-		answers := 0
-
-		for _, n := range bucket {
-			n.Fetch(hash, func(v Packet, err error) {
-				answers++
-
-				if err != nil {
-					done(nil, err)
-
-					return
-				}
-
-				if v.Header.Command == COMMAND_FOUND {
-					done(v.Data, nil)
-
-					return
-				}
-
-				if answers == len(bucket) {
-					done(nil, errors.New("Not found"))
-
-					return
-				}
-			})
-		}
-	})
+	return hash, nil
 }
 
-func (this *Dht) processFoundBucket(hash string, foundNodes []PacketContact, best []*Node, blacklist []*Node, done func([]*Node, error)) {
-	if len(foundNodes) == 0 {
-		this.performConnectToAll(hash, foundNodes, best, blacklist, done)
+func (this *Dht) Fetch(hash string) (interface{}, error) {
+	bucket := this.routing.FindNode(hash)
 
-		return
+	bucket, err := this.fetchNodes(hash)
+	if err != nil {
+		return nil, err
+	}
+
+	errored := 0
+
+	for _, n := range bucket {
+		promise := n.Fetch(hash)
+		res := <-promise
+
+		switch res.(type) {
+		case error:
+			errored++
+		case Packet:
+			if res.(Packet).Header.Command == COMMAND_FOUND {
+				return res.(Packet).Data, nil
+			}
+		default:
+		}
+
+	}
+
+	return nil, errors.New("Not found")
+}
+
+func (this *Dht) processFoundBucket(hash string, foundNodes []PacketContact, best []*Node, blacklist []*Node) ([]*Node, error) {
+	if len(foundNodes) == 0 {
+		return this.performConnectToAll(hash, foundNodes, best, blacklist)
 	}
 
 	foundNodes = this.filter(foundNodes, func(n PacketContact) bool {
@@ -174,9 +164,7 @@ func (this *Dht) processFoundBucket(hash string, foundNodes []PacketContact, bes
 	})
 
 	if len(foundNodes) == 0 {
-		done(best, nil)
-
-		return
+		return best, nil
 	}
 
 	lowestDistanceInBest := -1
@@ -196,43 +184,38 @@ func (this *Dht) processFoundBucket(hash string, foundNodes []PacketContact, bes
 	// }
 
 	if len(foundNodes) == 0 {
-		done(best, nil)
-
-		return
+		return best, nil
 	}
 
-	this.performConnectToAll(hash, foundNodes, best, blacklist, done)
+	return this.performConnectToAll(hash, foundNodes, best, blacklist)
 }
 
-func (this *Dht) fetchNodes(hash string, bucket []*Node, best []*Node, blacklist []*Node, done func([]*Node, error)) {
+func (this *Dht) fetchNodes(hash string) ([]*Node, error) {
+	return this.fetchNodes_(hash, this.routing.FindNode(hash), []*Node{}, []*Node{})
+}
+
+func (this *Dht) fetchNodes_(hash string, bucket []*Node, best []*Node, blacklist []*Node) ([]*Node, error) {
 	var foundNodes []PacketContact
 
-	nbAnswers := 0
-
 	if len(bucket) == 0 {
-		done(best, nil)
-
-		return
+		return best, nil
 	}
 
 	for _, node := range bucket {
-		node.FetchNodes(hash, func(val Packet, err error) {
-			nbAnswers++
+		promise := node.FetchNodes(hash)
 
-			if err != nil {
-				this.logger.Error(err.Error())
-				done(nil, err)
+		res := <-promise
 
-				return
-			}
-
-			foundNodes = append(foundNodes, val.Data.([]PacketContact)...)
-
-			if nbAnswers == len(bucket) {
-				this.processFoundBucket(hash, foundNodes, best, blacklist, done)
-			}
-		})
+		switch res.(type) {
+		case error:
+			return []*Node{}, res.(error)
+		case Packet:
+			foundNodes = append(foundNodes, res.(Packet).Data.([]PacketContact)...)
+		default:
+		}
 	}
+
+	return this.processFoundBucket(hash, foundNodes, best, blacklist)
 }
 
 func (this *Dht) contains(bucket []*Node, node PacketContact) bool {
@@ -257,30 +240,27 @@ func (this *Dht) filter(bucket []PacketContact, fn func(PacketContact) bool) []P
 	return res
 }
 
-func (this *Dht) performConnectToAll(hash string, foundNodes []PacketContact, best []*Node, blacklist []*Node, done func([]*Node, error)) {
-	this.connectToAll(foundNodes, func(connectedNodes []*Node, err error) {
-		if err != nil {
-			done([]*Node{}, err)
+func (this *Dht) performConnectToAll(hash string, foundNodes []PacketContact, best []*Node, blacklist []*Node) ([]*Node, error) {
+	connectedNodes, err := this.connectToAll(foundNodes)
 
-			return
-		}
+	if err != nil {
+		return []*Node{}, err
+	}
 
-		blacklist := append(blacklist, connectedNodes...)
+	blacklist = append(blacklist, connectedNodes...)
 
-		smalest := len(connectedNodes)
+	smalest := len(connectedNodes)
 
-		if smalest > BUCKET_SIZE {
-			smalest = BUCKET_SIZE
-		}
+	if smalest > BUCKET_SIZE {
+		smalest = BUCKET_SIZE
+	}
 
-		best = append(best, connectedNodes...)[:smalest]
+	best = append(best, connectedNodes...)[:smalest]
 
-		this.fetchNodes(hash, connectedNodes, best, blacklist, done)
-	})
-
+	return this.fetchNodes_(hash, connectedNodes, best, blacklist)
 }
 
-func (this *Dht) connectToAll(foundNodes []PacketContact, done func([]*Node, error)) {
+func (this *Dht) connectToAll(foundNodes []PacketContact) ([]*Node, error) {
 	newBucket := []*Node{}
 
 	for _, foundNode := range foundNodes {
@@ -293,80 +273,63 @@ func (this *Dht) connectToAll(foundNodes []PacketContact, done func([]*Node, err
 		newBucket = append(newBucket, n)
 	}
 
-	this.connectBucketAsync(newBucket, func(connectedNodes []*Node, err error) {
-		if err != nil {
-			done([]*Node{}, err)
-
-			return
-		}
-
-		done(connectedNodes, nil)
-	})
+	return this.connectBucketAsync(newBucket)
 }
 
-func (this *Dht) connectBucketAsync(bucket []*Node, cb func([]*Node, error)) {
+func (this *Dht) connectBucketAsync(bucket []*Node) ([]*Node, error) {
 	var res []*Node
 
 	answers := 0
 
 	if len(bucket) == 0 {
-		cb(res, nil)
-
-		return
+		return res, nil
 	}
 
 	for _, node := range bucket {
-		node.Connect(func(val Packet, err error) {
-			answers++
+		err := node.Connect()
+		answers++
 
-			if err != nil {
-				cb(nil, err)
+		if err != nil {
+			return nil, err
+		}
 
-				return
-			}
+		res = append(res, node)
 
-			res = append(res, node)
-
-			if answers == len(bucket) {
-				cb(res, nil)
-			}
-		})
+		if answers == len(bucket) {
+			return res, nil
+		}
 	}
+
+	return []*Node{}, nil
 }
 
-func (this *Dht) bootstrap() {
+func (this *Dht) bootstrap() error {
 	this.logger.Debug("Connecting to bootstrap node", this.options.BootstrapAddr)
 
 	bootstrapNode := NewNode(this, this.options.BootstrapAddr, "")
 
-	bootstrapNode.Connect(func(val Packet, err error) {
-		if err != nil {
-			this.logger.Critical(err)
-			os.Exit(1)
-		}
+	if err := bootstrapNode.Connect(); err != nil {
+		return err
+	}
 
-		bucket := this.routing.FindNode(this.hash)
+	_, err := this.fetchNodes(this.hash)
 
-		this.fetchNodes(this.hash, bucket, []*Node{}, []*Node{}, func(nodes []*Node, err error) {
-			if err != nil {
-				this.logger.Critical(err)
+	if err != nil {
+		return err
+	}
 
-				os.Exit(1)
-			}
+	this.logger.Info("Ready...")
 
-			this.logger.Info("Ready...")
+	if this.options.Interactif {
+		go this.Cli()
+	}
 
-			if this.options.Interactif {
-				go this.Cli()
-			}
-
-		})
-	})
+	return nil
 }
 
-func (this *Dht) Start() {
+func (this *Dht) Start() error {
 	if this.running {
-		return
+		return errors.New("Already started")
 	}
 
 	this.hash = NewRandomHash()
@@ -376,36 +339,50 @@ func (this *Dht) Start() {
 	l, err := net.Listen("tcp", this.options.ListenAddr)
 
 	if err != nil {
-		this.logger.Critical("Error listening:", err.Error())
-
-		os.Exit(1)
+		return errors.New("Error listening:" + err.Error())
 	}
+
+	this.server = l
 
 	this.logger.Info("Listening on " + this.options.ListenAddr)
 
-	this.running = true
-
 	if len(this.options.BootstrapAddr) > 0 {
-		this.bootstrap()
+		if err := this.bootstrap(); err != nil {
+			return errors.New("Bootstrap: " + err.Error())
+		}
+
+		if err := this.loop(); err != nil {
+			return errors.New("Main loop: " + err.Error())
+		}
 	} else {
 		if this.options.Interactif {
 			go this.Cli()
 		}
+
+		if err := this.loop(); err != nil {
+			return errors.New("Main loop: " + err.Error())
+		}
 	}
 
+	return nil
+}
+
+func (this *Dht) loop() error {
+	this.running = true
+
+	defer this.server.Close()
+
 	for this.running {
-		conn, err := l.Accept()
+		conn, err := this.server.Accept()
 
 		if err != nil {
-			this.logger.Critical("Error accepting: ", err.Error())
-
-			os.Exit(1)
+			return errors.New("Error accepting:" + err.Error())
 		}
 
 		go this.newConnection(conn)
 	}
 
-	defer l.Close()
+	return nil
 }
 
 func (this *Dht) Stop() {
@@ -418,12 +395,18 @@ func (this *Dht) Stop() {
 
 func (this *Dht) newConnection(conn net.Conn) {
 	socket := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
-
 	node := NewNodeSocket(this, conn.RemoteAddr().String(), "", socket)
 
-	node.Connect(func(val Packet, err error) {
-		if err != nil {
-			this.logger.Error("ERROR CONECT", err.Error())
-		}
-	})
+	err := node.Attach()
+
+	if err != nil {
+		this.logger.Error("Error attach", err.Error())
+
+		return
+	}
+
+}
+
+func (this *Dht) Logger() *logging.Logger {
+	return this.logger
 }

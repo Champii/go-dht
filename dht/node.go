@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/gob"
 	"errors"
-	"fmt"
 	"log"
 	"net"
 	"sync"
@@ -26,14 +25,20 @@ const (
 
 type Callback func(val Packet, err error)
 
+type CallbackChan struct {
+	timer *time.Timer
+	c     chan interface{}
+}
+
 type Node struct {
 	sync.RWMutex
 	contact      PacketContact
 	lastSeen     int64
 	socket       *bufio.ReadWriter
-	commandQueue map[string]Callback
+	commandQueue map[string]CallbackChan
 	listening    bool
 	dht          *Dht
+	bus          chan Packet
 }
 
 type PacketContact struct {
@@ -93,7 +98,7 @@ func NewNode(dht *Dht, addr string, hash string) *Node {
 		dht:          dht,
 		listening:    false,
 		lastSeen:     time.Now().Unix(),
-		commandQueue: make(map[string]Callback),
+		commandQueue: make(map[string]CallbackChan),
 		contact: PacketContact{
 			Addr: addr,
 			Hash: hash,
@@ -117,30 +122,31 @@ func (this *Node) Redacted() interface{} {
 	return this.contact.Hash[:16]
 }
 
-func (this *Node) Connect(done Callback) {
+func (this *Node) Attach() error {
+	this.loop()
+
+	return nil
+}
+
+func (this *Node) Connect() error {
 	this.dht.logger.Debug(this, ". Connect")
 
 	if this.listening {
 		this.dht.logger.Debug(this, "x Already listening...")
-		done(Packet{}, nil)
 
-		return
+		return nil
 	}
 
 	if this.socket != nil {
-		this.dht.logger.Debug(this, "x Is already connected...")
-		this.loop()
+		this.dht.logger.Warning(this, "x Is already connected...")
 
-		done(Packet{}, nil)
-		return
+		return this.Attach()
 	}
 
 	conn, err := net.Dial("tcp", this.contact.Addr)
 
 	if err != nil {
-		done(Packet{}, err)
-
-		return
+		return err
 	}
 
 	rw := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
@@ -149,21 +155,24 @@ func (this *Node) Connect(done Callback) {
 
 	this.loop()
 
-	this.Ping(func(val Packet, err error) {
-		if err != nil {
-			done(Packet{}, err)
+	promise := this.Ping()
 
-			return
-		}
+	res := <-promise
 
-		this.dht.logger.Debug(this, "o Connected")
-		done(val, nil)
-	})
+	switch res.(type) {
+	case error:
+		return res.(error)
+	default:
+	}
+
+	this.dht.logger.Debug(this, "o Connected")
+	return nil
 }
 
 func (this *Node) loop() {
 	go (func() {
 		this.listening = true
+
 		for {
 			var packet Packet
 
@@ -229,13 +238,15 @@ func (this *Node) loop() {
 	})()
 }
 
-func (this *Node) Ping(done Callback) {
+func (this *Node) Ping() chan interface{} {
 	this.dht.logger.Debug(this, "< PING")
 
-	this.send(this.newPacket(COMMAND_PING, "", nil), done)
+	return this.send(this.newPacket(COMMAND_PING, "", nil))
 }
 
 func (this *Node) OnPing(packet Packet) {
+	this.dht.logger.Debug(this, "> PING")
+
 	if len(this.contact.Hash) == 0 {
 		this.contact.Addr = packet.Header.Sender.Addr
 		this.contact.Hash = packet.Header.Sender.Hash
@@ -243,20 +254,18 @@ func (this *Node) OnPing(packet Packet) {
 	}
 	this.dht.routing.AddNode(this)
 
-	this.dht.logger.Debug(this, "> PING")
-
 	this.Pong(packet.Header.MessageHash)
 }
 
-func (this *Node) Pong(responseTo string) {
+func (this *Node) Pong(responseTo string) chan interface{} {
 	this.dht.logger.Debug(this, "< PONG")
 
 	data := this.newPacket(COMMAND_PONG, responseTo, nil)
 
-	this.send(data, func(Packet, error) {})
+	return this.send(data)
 }
 
-func (this *Node) OnPong(packet Packet, done Callback) {
+func (this *Node) OnPong(packet Packet, cb CallbackChan) {
 	this.dht.logger.Debug(this, "> PONG")
 
 	if len(this.contact.Hash) == 0 {
@@ -266,15 +275,15 @@ func (this *Node) OnPong(packet Packet, done Callback) {
 	}
 	this.dht.routing.AddNode(this)
 
-	done(packet, nil)
+	cb.c <- nil
 }
 
-func (this *Node) Fetch(hash string, done Callback) {
+func (this *Node) Fetch(hash string) chan interface{} {
 	this.dht.logger.Debug(this, "< FETCH", hash[:16])
 
 	data := this.newPacket(COMMAND_FETCH, "", hash)
 
-	this.send(data, done)
+	return this.send(data)
 }
 
 func (this *Node) OnFetch(packet Packet) {
@@ -290,12 +299,12 @@ func (this *Node) OnFetch(packet Packet) {
 	this.OnFetchNodes(packet)
 }
 
-func (this *Node) FetchNodes(hash string, done Callback) {
+func (this *Node) FetchNodes(hash string) chan interface{} {
 	this.dht.logger.Debug(this, "< FETCH NODES", hash[:16])
 
 	data := this.newPacket(COMMAND_FETCH_NODES, "", hash)
 
-	this.send(data, done)
+	return this.send(data)
 }
 
 func (this *Node) OnFetchNodes(packet Packet) {
@@ -317,13 +326,13 @@ func (this *Node) FoundNodes(packet Packet, nodesContact []PacketContact) {
 
 	data := this.newPacket(COMMAND_FOUND_NODES, packet.Header.MessageHash, nodesContact)
 
-	this.send(data, func(Packet, error) {})
+	this.send(data)
 }
 
-func (this *Node) OnFoundNodes(packet Packet, done Callback) {
+func (this *Node) OnFoundNodes(packet Packet, done CallbackChan) {
 	this.dht.logger.Debug(this, "> FOUND NODES", len(packet.Data.([]PacketContact)))
 
-	done(packet, nil)
+	done.c <- packet
 }
 
 func (this *Node) Found(packet Packet, value interface{}) {
@@ -331,21 +340,21 @@ func (this *Node) Found(packet Packet, value interface{}) {
 
 	data := this.newPacket(COMMAND_FOUND, packet.Header.MessageHash, value)
 
-	this.send(data, func(Packet, error) {})
+	this.send(data)
 }
 
-func (this *Node) OnFound(packet Packet, done Callback) {
+func (this *Node) OnFound(packet Packet, done CallbackChan) {
 	this.dht.logger.Debug(this, "> FOUND", packet.Data)
 
-	done(packet, nil)
+	done.c <- packet
 }
 
-func (this *Node) Store(hash string, value interface{}, done Callback) {
+func (this *Node) Store(hash string, value interface{}) chan interface{} {
 	this.dht.logger.Debug(this, "< STORE", hash[:16], value)
 
 	data := this.newPacket(COMMAND_STORE, "", StoreInst{Hash: hash, Data: value})
 
-	this.send(data, done)
+	return this.send(data)
 }
 
 func (this *Node) OnStore(packet Packet) {
@@ -362,49 +371,60 @@ func (this *Node) Stored(packet Packet) {
 
 	data := this.newPacket(COMMAND_STORED, packet.Header.MessageHash, nil)
 
-	this.send(data, func(Packet, error) {})
+	this.send(data)
 }
 
-func (this *Node) OnStored(packet Packet, done Callback) {
+func (this *Node) OnStored(packet Packet, done CallbackChan) {
 	this.dht.logger.Debug(this, "> STORED")
 
-	done(packet, nil)
+	done.c <- packet
 }
 
-func (this *Node) send(packet Packet, done Callback) {
+func (this *Node) send(packet Packet) chan interface{} {
 	enc := gob.NewEncoder(this.socket)
 
 	err := enc.Encode(packet)
 
+	res := make(chan interface{})
+
 	if err != nil {
-		fmt.Println("Error Encode", err.Error())
+		res <- errors.New("Error Encode" + err.Error())
+
+		return res
 	}
 
-	// If you just wanted to wait, you could have used
-	// `time.Sleep`. One reason a timer may be useful is
-	// that you can cancel the timer before it expires.
-	// Here's an example of that.
-
-	timer := time.NewTimer(time.Second * 5)
+	timer := time.NewTimer(time.Second * 30)
 
 	this.Lock()
-	this.commandQueue[packet.Header.MessageHash] = func(v Packet, err error) {
-		timer.Stop()
 
-		done(v, err)
+	this.commandQueue[packet.Header.MessageHash] = CallbackChan{
+		timer: timer,
+		c:     res,
 	}
+
 	this.Unlock()
 
 	go func() {
 		<-timer.C
-		done(packet, errors.New(this.contact.Hash[:16]+" Timeout"))
 
 		this.Lock()
 		delete(this.commandQueue, packet.Header.MessageHash)
 		this.Unlock()
+
+		var err string
+
+		if len(this.contact.Hash) > 0 {
+			err = this.contact.Hash[:16] + " Timeout"
+		} else {
+			err = this.contact.Addr + " Timeout"
+		}
+
+		res <- errors.New(err)
 	}()
 
 	this.socket.Flush()
+
+	return this.commandQueue[packet.Header.MessageHash].c
 }
 
 func (this *Node) disconnect() {

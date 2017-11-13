@@ -99,6 +99,7 @@ func manageArgs() {
 			Verbose:       c.Int("v"),
 			Stats:         c.Bool("s"),
 			Interactif:    c.Bool("i"),
+			OnStore:       func() {},
 		}
 
 		if c.Int("n") > 0 {
@@ -107,9 +108,11 @@ func manageArgs() {
 			return nil
 		}
 
-		dht := dht.New(options)
+		client := dht.New(options)
 
-		dht.Start()
+		if err := client.Start(); err != nil {
+			return err
+		}
 
 		return nil
 	}
@@ -125,14 +128,12 @@ func main() {
 func cluster(count int, options dht.DhtOptions) {
 	network := []*dht.Dht{}
 	i := 0
-	if len(options.BootstrapAddr) == 0 {
-		dht := dht.New(options)
 
-		go dht.Start()
+	if len(options.BootstrapAddr) == 0 {
+		client := startOne(options)
 
 		time.Sleep(time.Second)
-
-		network = append(network, dht)
+		network = append(network, client)
 
 		options.BootstrapAddr = options.ListenAddr
 
@@ -150,14 +151,25 @@ func cluster(count int, options dht.DhtOptions) {
 
 		options2.ListenAddr = addr + ":" + strconv.Itoa(port+i)
 
-		dht := dht.New(options2)
+		client := startOne(options2)
+		time.Sleep(time.Millisecond * time.Duration(10*count))
 
-		go dht.Start()
-
-		network = append(network, dht)
+		network = append(network, client)
 	}
 
 	for {
 		time.Sleep(time.Second)
 	}
+}
+
+func startOne(options dht.DhtOptions) *dht.Dht {
+	client := dht.New(options)
+
+	go func() {
+		if err := client.Start(); err != nil {
+			client.Logger().Critical(err)
+		}
+	}()
+
+	return client
 }

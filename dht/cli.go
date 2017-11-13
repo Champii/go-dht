@@ -23,8 +23,7 @@ func (this *Dht) Cli() {
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Split(bufio.ScanLines)
 
-	var prompt func()
-	prompt = func() {
+	for {
 		fmt.Print("$> ")
 
 		if !scanner.Scan() {
@@ -38,59 +37,49 @@ func (this *Dht) Cli() {
 		switch splited[0] {
 		case "h":
 			help()
-			prompt()
 		case "i":
 			fmt.Println("INFO")
-			prompt()
 		case "r":
 			this.PrintRoutingTable()
-			prompt()
 		case "s":
-			if len(splited) != 3 {
-				fmt.Println("Usage: s key value")
-				prompt()
+			if len(splited) != 2 {
+				fmt.Println("Usage: s value")
+				continue
 			}
 
-			this.Store(NewHash([]byte(splited[1])), splited[2], func(count int, err error) {
-				if err != nil {
-					fmt.Println(err.Error())
+			hash, err := this.Store(splited[1])
+			if err != nil {
+				fmt.Println(err.Error())
 
-					prompt()
-					return
-				}
+				continue
+			}
 
-				fmt.Println("Stored")
-				prompt()
-			})
+			fmt.Println(hash)
 		case "f":
-			this.Fetch(NewHash([]byte(splited[1])), func(v interface{}, err error) {
-				if err != nil {
-					fmt.Println(err.Error())
+			if len(splited) != 2 || len(splited[1]) != 64 {
+				fmt.Println("Usage: f key")
+				continue
+			}
 
-					prompt()
-					return
-				}
+			val, err := this.Fetch(splited[1])
+			if err != nil {
+				fmt.Println(err.Error())
 
-				fmt.Println(splited[1], ":", v)
+				continue
+			}
 
-				prompt()
+			fmt.Println(val)
 
-			})
 		case "l":
 			this.PrintLocalStore()
-			prompt()
 		case "q":
 			this.Stop()
 			os.Exit(1)
 		case "":
-			prompt()
 		default:
 			fmt.Println("Unknown command", splited[0])
-			prompt()
 		}
 	}
-
-	prompt()
 }
 
 func help() {

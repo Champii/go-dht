@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"time"
 
 	logging "github.com/op/go-logging"
 )
@@ -47,6 +48,14 @@ func New(options DhtOptions) *Dht {
 
 	res.logger.Debug("DHT version 0.0.1")
 
+	timer := time.NewTicker(time.Minute * 30)
+
+	go func() {
+		for range timer.C {
+			res.republish()
+		}
+	}()
+
 	return res
 }
 
@@ -82,6 +91,13 @@ func initLogger(dht *Dht) {
 	backendLeveled.SetLevel(logLevel, "")
 
 	logging.SetBackend(backendLeveled)
+}
+
+func (this *Dht) republish() {
+	for _, v := range this.store {
+		this.Store(v)
+	}
+	this.logger.Debug("Republished", len(this.store))
 }
 
 func (this *Dht) Store(value interface{}) (string, error) {

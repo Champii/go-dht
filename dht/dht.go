@@ -319,7 +319,7 @@ func (this *Dht) bootstrap() error {
 	this.logger.Info("Ready...")
 
 	if this.options.Interactif {
-		go this.Cli()
+		this.Cli()
 	}
 
 	return nil
@@ -348,19 +348,17 @@ func (this *Dht) Start() error {
 		if err := this.bootstrap(); err != nil {
 			return errors.New("Bootstrap: " + err.Error())
 		}
-
-		if err := this.loop(); err != nil {
-			return errors.New("Main loop: " + err.Error())
-		}
 	} else {
 		if this.options.Interactif {
-			go this.Cli()
-		}
-
-		if err := this.loop(); err != nil {
-			return errors.New("Main loop: " + err.Error())
+			this.Cli()
 		}
 	}
+
+	go func() {
+		if err := this.loop(); err != nil {
+			this.logger.Error("Main loop: " + err.Error())
+		}
+	}()
 
 	return nil
 }

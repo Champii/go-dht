@@ -15,7 +15,7 @@ func prepareArgs() *cli.App {
 	{{.Name}} - {{.Usage}}
 
 USAGE:
-	{{if .VisibleFlags}}{{.HelpName}} [options] [files]{{end}}
+	{{if .VisibleFlags}}{{.HelpName}} [options]{{end}}
 	{{if len .Authors}}
 AUTHOR:
 	{{range .Authors}}{{ . }}{{end}}
@@ -48,7 +48,7 @@ COPYRIGHT:
 	app.Version = "0.0.1"
 	app.Compiled = time.Now()
 
-	app.Usage = "Experimental DHT"
+	app.Usage = "Experimental Distributed Hash Table"
 
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
@@ -111,6 +111,7 @@ func manageArgs() {
 		client := dht.New(options)
 
 		if err := client.Start(); err != nil {
+			client.Logger().Critical(err)
 			return err
 		}
 
@@ -165,11 +166,9 @@ func cluster(count int, options dht.DhtOptions) {
 func startOne(options dht.DhtOptions) *dht.Dht {
 	client := dht.New(options)
 
-	go func() {
-		if err := client.Start(); err != nil {
-			client.Logger().Critical(err)
-		}
-	}()
+	if err := client.Start(); err != nil {
+		client.Logger().Critical(err)
+	}
 
 	return client
 }

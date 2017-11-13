@@ -87,7 +87,7 @@ func help() {
 	fmt.Println("  h            - This help")
 	fmt.Println("  i            - Global info")
 	fmt.Println("  r            - Print routing table")
-	fmt.Println("  s key val    - Store")
+	fmt.Println("  s val        - Store. Returns the hash of the stored item")
 	fmt.Println("  f key        - Fetch")
 	fmt.Println("  l            - Print local store")
 	fmt.Println("  q            - Quit")

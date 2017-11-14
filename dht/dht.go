@@ -129,9 +129,18 @@ func (this *Dht) StoreAt(hash string, value interface{}) (string, error) {
 	}
 
 	if len(bucket) != 0 {
-		for _, n := range bucket {
-			<-n.Store(hash, value)
+		var wg sync.WaitGroup
+
+		for _, node := range bucket {
+			wg.Add(1)
+			test := node
+			go func() {
+				<-test.Store(hash, value)
+				wg.Done()
+			}()
 		}
+
+		wg.Wait()
 	}
 
 	return hash, nil

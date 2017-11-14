@@ -347,7 +347,7 @@ func (this *Dht) connectBucketAsync(bucket []*Node) ([]*Node, error) {
 		answers++
 
 		if resArr[i] != nil {
-			return nil, resArr[i]
+			continue
 		}
 
 		res = append(res, node)

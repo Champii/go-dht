@@ -150,9 +150,7 @@ func (this *Node) Connect() error {
 		return err
 	}
 
-	rw := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
-
-	this.socket = rw
+	this.socket = bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
 
 	this.loop()
 

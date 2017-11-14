@@ -324,12 +324,29 @@ func (this *Dht) connectBucketAsync(bucket []*Node) ([]*Node, error) {
 		return res, nil
 	}
 
+	resArr := []error{}
+	var ws sync.WaitGroup
+	var mutex sync.RWMutex
+
 	for _, node := range bucket {
-		err := node.Connect()
+		ws.Add(1)
+		tmp := node
+		go func() {
+			err := tmp.Connect()
+			mutex.Lock()
+			resArr = append(resArr, err)
+			mutex.Unlock()
+			ws.Done()
+		}()
+	}
+
+	ws.Wait()
+
+	for i, node := range bucket {
 		answers++
 
-		if err != nil {
-			return nil, err
+		if resArr[i] != nil {
+			return nil, resArr[i]
 		}
 
 		res = append(res, node)

@@ -135,7 +135,6 @@ func cluster(count int, options dht.DhtOptions) {
 	if len(options.BootstrapAddr) == 0 {
 		client := startOne(options)
 
-		time.Sleep(time.Second)
 		network = append(network, client)
 
 		options.BootstrapAddr = options.ListenAddr
@@ -155,7 +154,6 @@ func cluster(count int, options dht.DhtOptions) {
 		options2.ListenAddr = addr + ":" + strconv.Itoa(port+i)
 
 		client := startOne(options2)
-		time.Sleep(time.Millisecond * time.Duration(1*count))
 
 		network = append(network, client)
 	}

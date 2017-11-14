@@ -361,6 +361,12 @@ func (this *Node) Store(hash string, value interface{}) chan interface{} {
 func (this *Node) OnStore(packet Packet) {
 	this.dht.logger.Debug(this, "> STORE", packet.Data.(StoreInst).Hash, packet.Data.(StoreInst).Data)
 
+	// fn := func(node *Node) chan interface{} {
+	// 	return node.FetchNodes(packet.Data.(StoreInst).Hash)
+	// }
+
+	// this.dht.fetchNodes(packet.Data.(StoreInst).Hash, fn)
+
 	// todo: check if best eligible
 	ok, bucket := this.dht.routing.IsBestStorage(packet.Data.(StoreInst).Hash)
 

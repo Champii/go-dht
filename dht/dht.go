@@ -99,6 +99,7 @@ func (this *Dht) republish() {
 		this.Store(v)
 		time.Sleep(time.Millisecond * 100)
 	}
+
 	this.logger.Debug("Republished", len(this.store))
 }
 
@@ -121,10 +122,16 @@ func (this *Dht) StoreAt(hash string, value interface{}) (string, error) {
 		return node.Store(hash, value)
 	}
 
-	_, _, err := this.fetchNodes(hash, fn)
+	bucket, _, err := this.fetchNodes(hash, fn)
 
 	if err != nil {
 		return "", err
+	}
+
+	if len(bucket) != 0 {
+		for _, n := range bucket {
+			<-n.Store(hash, value)
+		}
 	}
 
 	return hash, nil
@@ -232,9 +239,11 @@ func (this *Dht) fetchNodes_(hash string, bucket []*Node, best []*Node, blacklis
 			if res.(Packet).Header.Command == COMMAND_FOUND {
 				return []*Node{}, res.(Packet).Data, nil
 			}
+
 			switch res.(Packet).Data.(type) {
 			case []PacketContact:
 				toAdd := res.(Packet).Data.([]PacketContact)
+
 				for _, contact := range toAdd {
 					if !this.contactContains(foundNodes, contact) {
 						foundNodes = append(foundNodes, contact)

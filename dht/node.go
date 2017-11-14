@@ -21,6 +21,7 @@ const (
 	COMMAND_FETCH_NODES
 	COMMAND_FOUND
 	COMMAND_FOUND_NODES
+	COMMAND_CUSTOM
 )
 
 type Callback func(val Packet, err error)
@@ -228,6 +229,8 @@ func (this *Node) loop() {
 					this.OnFetchNodes(packet)
 				case COMMAND_STORE:
 					this.OnStore(packet)
+				case COMMAND_CUSTOM:
+					this.OnCustom(packet)
 				default:
 					this.dht.logger.Error(this, "x query: UNKNOWN COMMAND", packet.Header.Command)
 					continue
@@ -394,7 +397,24 @@ func (this *Node) OnStored(packet Packet, done CallbackChan) {
 	done.c <- packet
 }
 
+func (this *Node) Custom(value interface{}) chan interface{} {
+	this.dht.logger.Debug(this, "< CUSTOM")
+
+	data := this.newPacket(COMMAND_CUSTOM, "", value)
+
+	return this.send(data)
+}
+
+func (this *Node) OnCustom(packet Packet) {
+	this.dht.logger.Debug(this, "> CUSTOM")
+
+	this.dht.OnCustomCmd(packet)
+
+	this.send(this.newPacket(COMMAND_CUSTOM, packet.Header.MessageHash, nil))
+}
+
 func (this *Node) send(packet Packet) chan interface{} {
+	this.Lock()
 	enc := gob.NewEncoder(this.socket)
 
 	err := enc.Encode(packet)
@@ -409,14 +429,10 @@ func (this *Node) send(packet Packet) chan interface{} {
 
 	timer := time.NewTimer(time.Second * 30)
 
-	this.Lock()
-
 	this.commandQueue[packet.Header.MessageHash] = CallbackChan{
 		timer: timer,
 		c:     res,
 	}
-
-	this.Unlock()
 
 	go func() {
 		<-timer.C
@@ -437,6 +453,7 @@ func (this *Node) send(packet Packet) chan interface{} {
 	}()
 
 	this.socket.Flush()
+	this.Unlock()
 
 	return this.commandQueue[packet.Header.MessageHash].c
 }

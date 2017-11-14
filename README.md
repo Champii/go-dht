@@ -7,7 +7,7 @@ Basic DHT implementation in GO, based on the Kademilia specifications.
 
 # Usage
 
-```bash
+```
 NAME:
   DHT - Experimental Distributed Hash Table
 
@@ -46,7 +46,7 @@ $> go build && ./go-dht -n 3
 
 ### Interactive console to connect to the network
 
-```bash
+```
 $> go build && ./go-dht -b 0.0.0.0:3000 -p 0.0.0.0:6000 -i
 19:43:06.711 ▶ INFO 001 Listening on 0.0.0.0:6000
 19:43:06.720 ▶ INFO 002 Ready...
@@ -60,6 +60,10 @@ Commands:
   f key        - Fetch
   l            - Print local store
   q            - Quit
+$> s testValue
+92ba3721b20d13873730ce026db89920b47379dc39797ce74b925a3017c2048f
+$> f 92ba3721b20d13873730ce026db89920b47379dc39797ce74b925a3017c2048f
+testValue
 $>
 ```
 
@@ -87,8 +91,21 @@ func main() {
 	}
 
 	hash, _ := client.Store("Some value")
-	value, _ := client.Fetc(hash)
+	value, _ := client.Fetch(hash)
 
 	fmt.Println(value) // Prints 'Some value'
 }
 ```
+
+# Todo
+
+- Fix bug with store that does not work well when not enough nodes
+- Performances (better algo)
+- Avoid value change rewrite
+- BlackList for bad nodes (too many bad or incorrect answers)
+- Query object to symbolise a query on the network (allows to factorise code from Dht and keep only public methods on it)
+- Custom commands
+- Broadcast
+- Cryptography ?
+- Mirror Node (keeps all keys he finds)
+- Proxy Node (for NAT Traversal)

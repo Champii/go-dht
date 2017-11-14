@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"encoding/gob"
 	"errors"
+	"fmt"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	logging "github.com/op/go-logging"
@@ -20,7 +22,6 @@ type Dht struct {
 	store   map[string]interface{}
 	logger  *logging.Logger
 	server  net.Listener
-	Ready   chan error
 }
 
 type DhtOptions struct {
@@ -30,10 +31,10 @@ type DhtOptions struct {
 	Stats         bool
 	Interactif    bool
 	OnStore       func()
+	OnCustomCmd   func(Packet)
 }
 
 func New(options DhtOptions) *Dht {
-
 	res := &Dht{
 		routing: NewRouting(),
 		options: options,
@@ -105,13 +106,21 @@ func (this *Dht) Store(value interface{}) (string, error) {
 	enc := gob.NewEncoder(&buf)
 	err := enc.Encode(value)
 
+	if err != nil {
+		return "", err
+	}
+
 	hash := NewHash(buf.Bytes())
 
+	return this.StoreAt(hash, value)
+}
+
+func (this *Dht) StoreAt(hash string, value interface{}) (string, error) {
 	fn := func(node *Node) chan interface{} {
 		return node.Store(hash, value)
 	}
 
-	_, _, err = this.fetchNodes(hash, fn)
+	_, _, err := this.fetchNodes(hash, fn)
 
 	if err != nil {
 		return "", err
@@ -131,6 +140,10 @@ func (this *Dht) Fetch(hash string) (interface{}, error) {
 
 	if err != nil {
 		return nil, err
+	}
+
+	if res == nil {
+		return nil, errors.New("Not found")
 	}
 
 	return res, nil
@@ -191,19 +204,41 @@ func (this *Dht) fetchNodes_(hash string, bucket []*Node, best []*Node, blacklis
 		return best, nil, nil
 	}
 
-	for _, node := range bucket {
-		res := <-nodeFn(node)
+	var wg sync.WaitGroup
+	var resArr []interface{}
+	var mutex sync.RWMutex
 
+	for _, node := range bucket {
+		wg.Add(1)
+		test := node
+		go func() {
+			res := <-nodeFn(test)
+			mutex.Lock()
+			resArr = append(resArr, res)
+			mutex.Unlock()
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
+
+	for _, res := range resArr {
 		switch res.(type) {
 		case error:
-			return []*Node{}, nil, res.(error)
+			// return []*Node{}, nil, res.(error)
+			continue
 		case Packet:
 			if res.(Packet).Header.Command == COMMAND_FOUND {
 				return []*Node{}, res.(Packet).Data, nil
 			}
 			switch res.(Packet).Data.(type) {
 			case []PacketContact:
-				foundNodes = append(foundNodes, res.(Packet).Data.([]PacketContact)...)
+				toAdd := res.(Packet).Data.([]PacketContact)
+				for _, contact := range toAdd {
+					if !this.contactContains(foundNodes, contact) {
+						foundNodes = append(foundNodes, contact)
+					}
+				}
 			}
 		default:
 		}
@@ -215,6 +250,16 @@ func (this *Dht) fetchNodes_(hash string, bucket []*Node, best []*Node, blacklis
 func (this *Dht) contains(bucket []*Node, node PacketContact) bool {
 	for _, n := range bucket {
 		if node.Hash == n.contact.Hash {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (this *Dht) contactContains(bucket []PacketContact, node PacketContact) bool {
+	for _, n := range bucket {
+		if node.Hash == n.Hash {
 			return true
 		}
 	}
@@ -319,7 +364,7 @@ func (this *Dht) bootstrap() error {
 	this.logger.Info("Ready...")
 
 	if this.options.Interactif {
-		this.Cli()
+		go this.Cli()
 	}
 
 	return nil
@@ -344,18 +389,21 @@ func (this *Dht) Start() error {
 
 	this.logger.Info("Listening on " + this.options.ListenAddr)
 
+	this.running = true
+
 	if len(this.options.BootstrapAddr) > 0 {
 		if err := this.bootstrap(); err != nil {
 			return errors.New("Bootstrap: " + err.Error())
 		}
 	} else {
 		if this.options.Interactif {
-			this.Cli()
+			go this.Cli()
 		}
 	}
 
 	go func() {
 		if err := this.loop(); err != nil {
+			this.running = false
 			this.logger.Error("Main loop: " + err.Error())
 		}
 	}()
@@ -405,4 +453,31 @@ func (this *Dht) newConnection(conn net.Conn) {
 
 func (this *Dht) Logger() *logging.Logger {
 	return this.logger
+}
+
+func (this *Dht) CustomCmd(data interface{}) {
+	bucket := this.routing.FindNode(this.hash)
+
+	for _, node := range bucket {
+		res := node.Custom(data)
+		fmt.Println(res)
+	}
+}
+
+func (this *Dht) Broadcast(data interface{}) {
+
+}
+
+func (this *Dht) Running() bool {
+	return this.running
+}
+
+func (this *Dht) Wait() {
+	for this.running {
+		time.Sleep(time.Second)
+	}
+}
+
+func (this *Dht) OnCustomCmd(packet Packet) {
+	this.options.OnCustomCmd(packet)
 }

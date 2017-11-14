@@ -115,6 +115,8 @@ func manageArgs() {
 			return err
 		}
 
+		client.Wait()
+
 		return nil
 	}
 
@@ -153,7 +155,7 @@ func cluster(count int, options dht.DhtOptions) {
 		options2.ListenAddr = addr + ":" + strconv.Itoa(port+i)
 
 		client := startOne(options2)
-		time.Sleep(time.Millisecond * time.Duration(10*count))
+		time.Sleep(time.Millisecond * time.Duration(1*count))
 
 		network = append(network, client)
 	}

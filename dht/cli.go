@@ -23,7 +23,7 @@ func (this *Dht) Cli() {
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Split(bufio.ScanLines)
 
-	for {
+	for this.running {
 		fmt.Print("$> ")
 
 		if !scanner.Scan() {

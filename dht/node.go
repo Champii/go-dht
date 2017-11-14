@@ -470,10 +470,9 @@ func (this *Node) OnBroadcast(packet Packet) {
 	if this.hasBroadcast(packet.Header.MessageHash) {
 		return
 	}
+	this.dht.gotBroadcast = append(this.dht.gotBroadcast, packet.Header.MessageHash)
 
 	this.dht.logger.Debug(this, "> BROADCAST")
-
-	this.dht.gotBroadcast = append(this.dht.gotBroadcast, packet.Header.MessageHash)
 
 	this.dht.Broadcast(packet)
 	this.dht.OnBroadcast(packet)

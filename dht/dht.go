@@ -180,9 +180,9 @@ func (this *Dht) processFoundBucket(hash string, foundNodes []PacketContact, bes
 		return !this.contains(best, n)
 	})
 
-	// foundNodes = this.filter(foundNodes, func(n PacketContact) bool {
-	// 	return n.Hash != this.hash
-	// })
+	foundNodes = this.filter(foundNodes, func(n PacketContact) bool {
+		return n.Hash != this.hash
+	})
 
 	if len(foundNodes) == 0 {
 		return best, nil, nil

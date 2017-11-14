@@ -49,7 +49,7 @@ func New(options DhtOptions) *Dht {
 
 	res.logger.Debug("DHT version 0.0.1")
 
-	timer := time.NewTicker(time.Minute * 30)
+	timer := time.NewTicker(time.Minute * 15)
 
 	go func() {
 		for range timer.C {
@@ -97,6 +97,7 @@ func initLogger(dht *Dht) {
 func (this *Dht) republish() {
 	for _, v := range this.store {
 		this.Store(v)
+		time.Sleep(time.Millisecond * 100)
 	}
 	this.logger.Debug("Republished", len(this.store))
 }

@@ -99,6 +99,7 @@ func main() {
 
 # Todo
 
+- Little sleep on republish and little range in timer
 - Fix bug with store that does not work well when not enough nodes
 - Performances (better algo)
 - Avoid value change rewrite

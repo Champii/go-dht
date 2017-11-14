@@ -425,7 +425,7 @@ func (this *Node) send(packet Packet) chan interface{} {
 		return res
 	}
 
-	timer := time.NewTimer(time.Second * 30)
+	timer := time.NewTimer(time.Second * 5)
 
 	this.commandQueue[packet.Header.MessageHash] = CallbackChan{
 		timer: timer,

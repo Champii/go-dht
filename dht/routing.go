@@ -175,7 +175,7 @@ func (this *Routing) FindNode(hash string) []*Node {
 		bucketNb--
 	}
 
-	bucketNb = this.countSameBit(hash)
+	bucketNb = this.countSameBit(hash) + 1
 
 	for len(res) < BUCKET_SIZE && bucketNb >= 0 {
 		for _, node := range this.buckets[bucketNb] {
@@ -231,4 +231,16 @@ func (this *Routing) IsBestStorage(hash string) (bool, []*Node) {
 	}
 
 	return true, []*Node{}
+}
+
+func (this *Routing) GetAllNodes() []*Node {
+	res := []*Node{}
+
+	for i := 0; i < BUCKET_SIZE; i++ {
+		for _, node := range this.buckets[i] {
+			res = append(res, node)
+		}
+	}
+
+	return res
 }

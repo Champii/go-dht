@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/gob"
 	"errors"
-	"fmt"
 	"net"
 	"os"
 	"sync"
@@ -15,13 +14,14 @@ import (
 )
 
 type Dht struct {
-	routing *Routing
-	options DhtOptions
-	hash    string
-	running bool
-	store   map[string]interface{}
-	logger  *logging.Logger
-	server  net.Listener
+	routing      *Routing
+	options      DhtOptions
+	hash         string
+	running      bool
+	store        map[string]interface{}
+	logger       *logging.Logger
+	server       net.Listener
+	gotBroadcast []string
 }
 
 type DhtOptions struct {
@@ -31,7 +31,8 @@ type DhtOptions struct {
 	Stats         bool
 	Interactif    bool
 	OnStore       func()
-	OnCustomCmd   func(Packet)
+	OnCustomCmd   func(Packet) interface{}
+	OnBroadcast   func(Packet) interface{}
 }
 
 func New(options DhtOptions) *Dht {
@@ -179,9 +180,9 @@ func (this *Dht) processFoundBucket(hash string, foundNodes []PacketContact, bes
 		return !this.contains(best, n)
 	})
 
-	foundNodes = this.filter(foundNodes, func(n PacketContact) bool {
-		return n.Hash != this.hash
-	})
+	// foundNodes = this.filter(foundNodes, func(n PacketContact) bool {
+	// 	return n.Hash != this.hash
+	// })
 
 	if len(foundNodes) == 0 {
 		return best, nil, nil
@@ -484,7 +485,6 @@ func (this *Dht) newConnection(conn net.Conn) {
 
 		return
 	}
-
 }
 
 func (this *Dht) Logger() *logging.Logger {
@@ -495,13 +495,26 @@ func (this *Dht) CustomCmd(data interface{}) {
 	bucket := this.routing.FindNode(this.hash)
 
 	for _, node := range bucket {
-		res := node.Custom(data)
-		fmt.Println(res)
+		<-node.Custom(data)
 	}
 }
 
 func (this *Dht) Broadcast(data interface{}) {
+	bucket := this.routing.GetAllNodes()
 
+	var packet Packet
+	switch data.(type) {
+	case Packet:
+		packet = data.(Packet)
+	default:
+		if len(bucket) > 0 {
+			packet = bucket[0].newPacket(COMMAND_BROADCAST, "", data)
+		}
+	}
+
+	for _, node := range bucket {
+		node.Broadcast(packet)
+	}
 }
 
 func (this *Dht) Running() bool {
@@ -514,6 +527,18 @@ func (this *Dht) Wait() {
 	}
 }
 
-func (this *Dht) OnCustomCmd(packet Packet) {
-	this.options.OnCustomCmd(packet)
+func (this *Dht) OnCustomCmd(packet Packet) interface{} {
+	if this.options.OnCustomCmd != nil {
+		return this.options.OnCustomCmd(packet)
+	}
+
+	return nil
+}
+
+func (this *Dht) OnBroadcast(packet Packet) interface{} {
+	if this.options.OnBroadcast != nil {
+		return this.options.OnBroadcast(packet)
+	}
+
+	return nil
 }

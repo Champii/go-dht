@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	COMMAND_PING = iota
+	COMMAND_NOOP = iota
+	COMMAND_PING
 	COMMAND_PONG
 	COMMAND_STORE
 	COMMAND_STORED
@@ -21,7 +22,9 @@ const (
 	COMMAND_FETCH_NODES
 	COMMAND_FOUND
 	COMMAND_FOUND_NODES
+	COMMAND_BROADCAST
 	COMMAND_CUSTOM
+	COMMAND_CUSTOM_ANSWER
 )
 
 type Callback func(val Packet, err error)
@@ -65,6 +68,11 @@ type StoreInst struct {
 	Data interface{}
 }
 
+type CustomCmd struct {
+	Command int
+	Data    interface{}
+}
+
 func (this *Node) newPacket(command int, responseTo string, data interface{}) Packet {
 	packet := Packet{
 		Header: PacketHeader{
@@ -82,6 +90,7 @@ func (this *Node) newPacket(command int, responseTo string, data interface{}) Pa
 
 	gob.Register([]PacketContact{})
 	gob.Register(StoreInst{})
+	gob.Register(CustomCmd{})
 
 	tmp, err := msgpack.Marshal(&packet)
 
@@ -195,11 +204,14 @@ func (this *Node) loop() {
 				this.Unlock()
 
 				if !ok {
-					this.dht.logger.Error(this, "x Unknown response: ", packet.Header.ResponseTo)
+					this.dht.logger.Error(this, "x Unknown response: ", packet.Header.ResponseTo, packet)
 					continue
 				}
 
 				switch packet.Header.Command {
+				case COMMAND_NOOP:
+					this.dht.logger.Debug(this, "> NOOP")
+					cb.c <- packet
 				case COMMAND_PONG:
 					this.OnPong(packet, cb)
 				case COMMAND_FOUND:
@@ -208,6 +220,8 @@ func (this *Node) loop() {
 					this.OnFoundNodes(packet, cb)
 				case COMMAND_STORED:
 					this.OnStored(packet, cb)
+				case COMMAND_CUSTOM_ANSWER:
+					this.OnCustomAnswer(packet, cb)
 
 				default:
 					this.dht.logger.Error(this, "x answer: UNKNOWN COMMAND", packet.Header.Command)
@@ -219,12 +233,15 @@ func (this *Node) loop() {
 				this.Unlock()
 			} else {
 				switch packet.Header.Command {
+				case COMMAND_NOOP:
 				case COMMAND_PING:
 					this.OnPing(packet)
 				case COMMAND_FETCH:
 					this.OnFetch(packet)
 				case COMMAND_FETCH_NODES:
 					this.OnFetchNodes(packet)
+				case COMMAND_BROADCAST:
+					this.OnBroadcast(packet)
 				case COMMAND_STORE:
 					this.OnStore(packet)
 				case COMMAND_CUSTOM:
@@ -412,13 +429,62 @@ func (this *Node) Custom(value interface{}) chan interface{} {
 func (this *Node) OnCustom(packet Packet) {
 	this.dht.logger.Debug(this, "> CUSTOM")
 
-	this.dht.OnCustomCmd(packet)
+	res := this.dht.OnCustomCmd(packet)
+	this.dht.logger.Debug(this, "< CUSTOM ANSWER")
 
-	this.send(this.newPacket(COMMAND_CUSTOM, packet.Header.MessageHash, nil))
+	if res == nil {
+		this.send(this.newPacket(COMMAND_CUSTOM_ANSWER, packet.Header.MessageHash, "Unknown"))
+		return
+	}
+
+	this.send(this.newPacket(COMMAND_CUSTOM_ANSWER, packet.Header.MessageHash, res))
+}
+
+func (this *Node) OnCustomAnswer(packet Packet, done CallbackChan) {
+	this.dht.logger.Debug(this, "> CUSTOM ANSWER")
+
+	done.c <- packet
+
+}
+
+func (this *Node) hasBroadcast(hash string) bool {
+	for _, h := range this.dht.gotBroadcast {
+		if h == hash {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (this *Node) Broadcast(packet Packet) chan interface{} {
+	this.dht.logger.Debug(this, "< BROADCAST")
+
+	this.dht.gotBroadcast = append(this.dht.gotBroadcast, packet.Header.MessageHash)
+	// data := this.newPacket(COMMAND_BROADCAST, "", value)
+
+	return this.send(packet)
+}
+
+func (this *Node) OnBroadcast(packet Packet) {
+	if this.hasBroadcast(packet.Header.MessageHash) {
+		return
+	}
+
+	this.dht.logger.Debug(this, "> BROADCAST")
+
+	this.dht.gotBroadcast = append(this.dht.gotBroadcast, packet.Header.MessageHash)
+
+	this.dht.Broadcast(packet)
+	this.dht.OnBroadcast(packet)
+
+	// this.send(this.newPacket(COMMAND_NOOP, packet.Header.MessageHash, nil))
 }
 
 func (this *Node) send(packet Packet) chan interface{} {
 	this.Lock()
+	defer this.Unlock()
+
 	enc := gob.NewEncoder(this.socket)
 
 	err := enc.Encode(packet)
@@ -457,7 +523,6 @@ func (this *Node) send(packet Packet) chan interface{} {
 	}()
 
 	this.socket.Flush()
-	this.Unlock()
 
 	return this.commandQueue[packet.Header.MessageHash].c
 }

@@ -460,15 +460,15 @@ func (this *Node) hasBroadcast(hash string) bool {
 func (this *Node) Broadcast(packet Packet) chan interface{} {
 	this.dht.logger.Debug(this, "< BROADCAST")
 
-	this.dht.gotBroadcast = append(this.dht.gotBroadcast, packet.Header.MessageHash)
+	if !this.hasBroadcast(packet.Header.MessageHash) {
+		this.dht.gotBroadcast = append(this.dht.gotBroadcast, packet.Header.MessageHash)
+	}
 	// data := this.newPacket(COMMAND_BROADCAST, "", value)
 
 	return this.send(packet)
 }
 
 func (this *Node) OnBroadcast(packet Packet) {
-	this.Lock()
-	defer this.Unlock()
 	if this.hasBroadcast(packet.Header.MessageHash) {
 		return
 	}

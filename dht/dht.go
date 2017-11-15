@@ -514,6 +514,7 @@ func (this *Dht) Broadcast(data interface{}) {
 
 	for _, node := range bucket {
 		node.Broadcast(packet)
+		time.Sleep(time.Millisecond * 100)
 	}
 }
 

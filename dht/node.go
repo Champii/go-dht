@@ -467,9 +467,12 @@ func (this *Node) Broadcast(packet Packet) chan interface{} {
 }
 
 func (this *Node) OnBroadcast(packet Packet) {
+	this.Lock()
+	defer this.Unlock()
 	if this.hasBroadcast(packet.Header.MessageHash) {
 		return
 	}
+
 	this.dht.gotBroadcast = append(this.dht.gotBroadcast, packet.Header.MessageHash)
 
 	this.dht.logger.Debug(this, "> BROADCAST")

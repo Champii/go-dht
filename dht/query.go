@@ -66,6 +66,8 @@ func (this *Query) addToQueue(node *Node) {
 }
 
 func (this *Query) WaitResult() interface{} {
+	storeAnswers := []bool{}
+
 	for res := range this.workerQueue.Results {
 		switch res.(type) {
 		case error:
@@ -77,6 +79,8 @@ func (this *Query) WaitResult() interface{} {
 			}
 
 			switch res.(Packet).Data.(type) {
+			case bool:
+				storeAnswers = append(storeAnswers, res.(Packet).Data.(bool))
 			case []PacketContact:
 				toAdd := res.(Packet).Data.([]PacketContact)
 
@@ -86,6 +90,10 @@ func (this *Query) WaitResult() interface{} {
 			}
 		default:
 		}
+	}
+
+	if len(storeAnswers) > 0 {
+		return storeAnswers
 	}
 
 	return this.best

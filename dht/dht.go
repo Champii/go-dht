@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/gob"
+	"encoding/hex"
 	"errors"
 	"net"
 	"os"
@@ -107,13 +108,13 @@ func (this *Dht) republish() {
 	this.logger.Debug("Republished", len(this.store))
 }
 
-func (this *Dht) Store(value interface{}) ([]byte, error) {
+func (this *Dht) Store(value interface{}) ([]byte, int, error) {
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
 	err := enc.Encode(value)
 
 	if err != nil {
-		return []byte{}, err
+		return []byte{}, 0, err
 	}
 
 	hash := NewHash(buf.Bytes())
@@ -121,11 +122,11 @@ func (this *Dht) Store(value interface{}) ([]byte, error) {
 	return this.StoreAt(hash, value)
 }
 
-func (this *Dht) StoreAt(hash []byte, value interface{}) ([]byte, error) {
+func (this *Dht) StoreAt(hash []byte, value interface{}) ([]byte, int, error) {
 	bucket := this.fetchNodes(hash)
 
 	if len(bucket) == 0 {
-		return []byte{}, errors.New("No nodes found")
+		return []byte{}, 0, errors.New("No nodes found")
 	}
 
 	fn := func(node *Node) chan interface{} {
@@ -134,13 +135,24 @@ func (this *Dht) StoreAt(hash []byte, value interface{}) ([]byte, error) {
 
 	query := NewQuery(hash, fn, this)
 
-	res := query.Run().([]*Node)
+	res := query.Run().([]bool)
 
 	if len(res) == 0 {
-		return []byte{}, errors.New("No answers from nodes")
+		return []byte{}, 0, errors.New("No answers from nodes")
 	}
 
-	return hash, nil
+	storedOkNb := 0
+	for _, stored := range res {
+		if stored {
+			storedOkNb++
+		}
+	}
+
+	if storedOkNb == 0 {
+		return []byte{}, 0, errors.New(hex.EncodeToString(hash) + ": The key might be existing already")
+	}
+
+	return hash, storedOkNb, nil
 }
 
 func (this *Dht) Fetch(hash []byte) (interface{}, error) {
@@ -184,16 +196,19 @@ func (this *Dht) bootstrap() error {
 
 	// TODO: fetch one node on each k-bucket
 	// ownHash, _ := hex.DecodeString(NewRandomHash())
-	for i, bucket := range this.routing.buckets {
-		if len(bucket) != 0 {
-			continue
+
+	go func() {
+		for i, bucket := range this.routing.buckets {
+			if len(bucket) != 0 {
+				continue
+			}
+
+			h := NewRandomHash()
+			h = this.routing.nCopy(h, this.hash, i)
+
+			_ = this.fetchNodes(h)
 		}
-
-		h := NewRandomHash()
-		h = this.routing.nCopy(h, this.hash, i)
-
-		_ = this.fetchNodes(h)
-	}
+	}()
 
 	this.logger.Info("Ready...")
 

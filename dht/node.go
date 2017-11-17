@@ -373,21 +373,28 @@ func (this *Node) Store(hash []byte, value interface{}) chan interface{} {
 func (this *Node) OnStore(packet Packet) {
 	this.dht.logger.Debug(this, "> STORE", packet.Data.(StoreInst).Hash, packet.Data.(StoreInst).Data)
 
+	_, ok := this.dht.store[hex.EncodeToString(packet.Data.(StoreInst).Hash)]
+
+	if ok {
+		this.Stored(packet, false)
+		return
+	}
+
 	this.dht.store[hex.EncodeToString(packet.Data.(StoreInst).Hash)] = packet.Data.(StoreInst).Data
 
-	this.Stored(packet)
+	this.Stored(packet, true)
 }
 
-func (this *Node) Stored(packet Packet) {
+func (this *Node) Stored(packet Packet, hasStored bool) {
 	this.dht.logger.Debug(this, "< STORED")
 
-	data := this.newPacket(COMMAND_STORED, packet.Header.MessageHash, nil)
+	data := this.newPacket(COMMAND_STORED, packet.Header.MessageHash, hasStored)
 
 	this.send(data)
 }
 
 func (this *Node) OnStored(packet Packet, done CallbackChan) {
-	this.dht.logger.Debug(this, "> STORED")
+	this.dht.logger.Debug(this, "> STORED", packet.Data.(bool))
 
 	done.c <- packet
 }

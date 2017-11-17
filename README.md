@@ -45,7 +45,7 @@ $> go build && ./go-dht -n 3 -v 4
 ### Interactive console to connect to the network
 
 ```
-$> go build && ./go-dht -b 0.0.0.0:3000 -p 0.0.0.0:6000 -i
+$> go build && ./go-dht -c 0.0.0.0:3000 -l 0.0.0.0:6000 -i
 19:43:06.711 ▶ INFO 001 Listening on 0.0.0.0:6000
 19:43:06.720 ▶ INFO 002 Ready...
 Type 'h' to get help

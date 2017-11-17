@@ -22,7 +22,7 @@ OPTIONS:
   -l value, --listen value     Listening addr:port (default: "0.0.0.0:3000")
   -i                           Interactif
   -s                           Stat mode
-  -v level, --verbose level    Verbose level, 0 for CRITICAL and 5 for DEBUG (default: 4)
+  -v level, --verbose level    Verbose level, 0 for CRITICAL and 5 for DEBUG (default: 3)
   -n nodes, --network nodes    Spawn X new nodes in a network. (default: 0)
   -h, --help                   Print help
   -V, --version                Print version
@@ -30,10 +30,10 @@ OPTIONS:
 
 ## Basics
 
-### Launch a network of 3 nodes (including a bootstrap node) with default options:
+### Launch a network of 3 nodes (including a bootstrap node) with default options and a little verbose:
 
 ```bash
-$> go build && ./go-dht -n 3
+$> go build && ./go-dht -n 3 -v 4
 19:45:57.136 ▶ INFO 001 Listening on 0.0.0.0:3000
 19:45:58.136 ▶ INFO 002 Listening on 0.0.0.0:3001
 19:45:58.137 ▶ INFO 003 Ready...

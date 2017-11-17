@@ -30,7 +30,7 @@ type DhtOptions struct {
 	Verbose       int
 	Stats         bool
 	Interactif    bool
-	OnStore       func(Packet) interface{}
+	OnStore       func(Packet) bool
 	OnCustomCmd   func(Packet) interface{}
 	OnBroadcast   func(Packet) interface{}
 }
@@ -193,9 +193,6 @@ func (this *Dht) bootstrap() error {
 	}
 
 	_ = this.fetchNodes(this.hash)
-
-	// TODO: fetch one node on each k-bucket
-	// ownHash, _ := hex.DecodeString(NewRandomHash())
 
 	go func() {
 		for i, bucket := range this.routing.buckets {
@@ -363,7 +360,7 @@ func (this *Dht) Wait() {
 	}
 }
 
-func (this *Dht) OnCustomCmd(packet Packet) interface{} {
+func (this *Dht) onCustomCmd(packet Packet) interface{} {
 	if this.options.OnCustomCmd != nil {
 		return this.options.OnCustomCmd(packet)
 	}
@@ -371,7 +368,7 @@ func (this *Dht) OnCustomCmd(packet Packet) interface{} {
 	return nil
 }
 
-func (this *Dht) OnBroadcast(packet Packet) interface{} {
+func (this *Dht) onBroadcast(packet Packet) interface{} {
 	if this.options.OnBroadcast != nil {
 		return this.options.OnBroadcast(packet)
 	}
@@ -381,4 +378,8 @@ func (this *Dht) OnBroadcast(packet Packet) interface{} {
 
 func (this *Dht) GetConnectedNumber() int {
 	return this.routing.Size()
+}
+
+func (this *Dht) StoredKeys() int {
+	return len(this.store)
 }

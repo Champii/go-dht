@@ -45,7 +45,7 @@ COPYRIGHT:
 	app := cli.NewApp()
 
 	app.Name = "DHT"
-	app.Version = "0.0.1"
+	app.Version = "0.1.1"
 	app.Compiled = time.Now()
 
 	app.Usage = "Experimental Distributed Hash Table"
@@ -71,11 +71,11 @@ COPYRIGHT:
 		cli.IntFlag{
 			Name:  "n, network",
 			Value: 0,
-			Usage: "Spawn X new `nodes` network. If -b is not specified, a new network is created.",
+			Usage: "Spawn X new `nodes` network.",
 		},
 		cli.IntFlag{
 			Name:  "v, verbose",
-			Value: 4,
+			Value: 3,
 			Usage: "Verbose `level`, 0 for CRITICAL and 5 for DEBUG",
 		},
 	}
@@ -100,10 +100,15 @@ func manageArgs() {
 
 		if c.Int("n") > 0 {
 			options.Stats = false
+			options.Interactif = false
 
 			cluster(c.Int("n"), options)
 
 			return nil
+		}
+
+		if options.Interactif {
+			options.Stats = false
 		}
 
 		client := dht.New(options)

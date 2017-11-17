@@ -375,7 +375,7 @@ func (this *Node) OnStore(packet Packet) {
 
 	_, ok := this.dht.store[hex.EncodeToString(packet.Data.(StoreInst).Hash)]
 
-	if ok {
+	if ok || this.dht.options.OnStore(packet) {
 		this.Stored(packet, false)
 		return
 	}
@@ -410,7 +410,7 @@ func (this *Node) Custom(value interface{}) chan interface{} {
 func (this *Node) OnCustom(packet Packet) {
 	this.dht.logger.Debug(this, "> CUSTOM")
 
-	res := this.dht.OnCustomCmd(packet)
+	res := this.dht.onCustomCmd(packet)
 	this.dht.logger.Debug(this, "< CUSTOM ANSWER")
 
 	if res == nil {
@@ -448,7 +448,7 @@ func (this *Node) OnBroadcast(packet Packet) {
 	this.dht.logger.Debug(this, "> BROADCAST")
 
 	this.dht.Broadcast(packet)
-	this.dht.OnBroadcast(packet)
+	this.dht.onBroadcast(packet)
 
 	// this.send(this.newPacket(COMMAND_NOOP, packet.Header.MessageHash, nil))
 }

@@ -1,11 +1,11 @@
 # go-dht
 DHT implementation in GO
 
-# Intro
+## Intro
 
 Basic DHT implementation in GO, based on the Kademilia specifications.
 
-# Usage
+## Usage
 
 ```
 NAME:
@@ -15,22 +15,20 @@ USAGE:
   go-dht [options]
 
 VERSION:
-  0.0.1
+  0.1.1
 
 OPTIONS:
-  -b value, --bootstrap value  Connect to bootstrap node ip:port
-  -p value, --port value       Listening port (default: "0.0.0.0:3000")
+  -c value, --connect value    Connect to bootstrap node ip:port
+  -l value, --listen value     Listening addr:port (default: "0.0.0.0:3000")
   -i                           Interactif
   -s                           Stat mode
-  -q, --quiet                  Quiet
-  -n nodes, --network nodes    Spawn X new nodes network. If -b is not specified, a new network is created. (default: 0)
   -v level, --verbose level    Verbose level, 0 for CRITICAL and 5 for DEBUG (default: 4)
+  -n nodes, --network nodes    Spawn X new nodes in a network. (default: 0)
   -h, --help                   Print help
   -V, --version                Print version
-
 ```
 
-# Basics
+## Basics
 
 ### Launch a network of 3 nodes (including a bootstrap node) with default options:
 
@@ -85,27 +83,55 @@ func main() {
 	})
 
 	if err := client.Start(); err != nil {
-		fmt.Println(err)
-
 		return
 	}
 
-	hash, _ := client.Store("Some value")
-	value, _ := client.Fetch(hash)
+	hash, stored, err := client.Store("Some value")
+
+	if err != nil || stored == 0 {
+		return
+	}
+
+	value, err := client.Fetch(hash)
+
+	if err != nil {
+		return
+	}
 
 	fmt.Println(value) // Prints 'Some value'
 }
 ```
 
-# Todo
+## API
 
+```go
+func New(DhtOptions) *Dht
+
+func (*Dht) Start() error
+func (*Dht) Stop()
+
+func (*Dht) Store(interface{}) ([]byte, int, error)
+func (*Dht) StoreAt([]byte, interface{}) ([]byte, int, error)
+func (*Dht) Fetch([]byte) ([]byte, int, error)
+
+func (*Dht) CustomCmd(interface{})
+func (*Dht) Broadcast(interface{})
+
+func (*Dht) Logger() *logging.logger
+func (*Dht) Running() bool
+func (*Dht) Wait()
+func (*Dht) GetConnectedNumber() int
+func (*Dht) StoredKeys() int
+
+```
+
+## Todo
+
+- Give some keys to newly connected
 - keep old blocks in bucket (keep it sorted tho)
 - Little sleep on republish and little range in timer
 - Performances (better algo)
-- Avoid value change rewrite
 - BlackList for bad nodes (too many bad or incorrect answers)
-- Custom commands
-- Broadcast
 - Cryptography ?
 - Mirror Node (keeps all keys he finds)
 - Proxy Node (for NAT Traversal)

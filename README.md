@@ -111,3 +111,4 @@ func main() {
 - Proxy Node (for NAT Traversal)
 - Debug Node that gets all infos from every nodes (Add a debug mode to do so)
 - UDP instead of TCP ?
+- key expire timeout ?

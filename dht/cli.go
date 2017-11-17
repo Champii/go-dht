@@ -2,6 +2,7 @@ package dht
 
 import (
 	"bufio"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -54,14 +55,21 @@ func (this *Dht) Cli() {
 				continue
 			}
 
-			fmt.Println(hash)
+			fmt.Println(hex.EncodeToString(hash))
 		case "f":
-			if len(splited) != 2 || len(splited[1]) != 64 {
+			if len(splited) != 2 || len(splited[1]) != BUCKET_SIZE*2 {
 				fmt.Println("Usage: f key")
 				continue
 			}
 
-			val, err := this.Fetch(splited[1])
+			h, err := hex.DecodeString(splited[1])
+			if err != nil {
+				fmt.Println(err.Error())
+
+				continue
+			}
+
+			val, err := this.Fetch(h)
 			if err != nil {
 				fmt.Println(err.Error())
 

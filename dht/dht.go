@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net"
 	"os"
-	"sync"
 	"time"
 
 	logging "github.com/op/go-logging"
@@ -16,12 +15,12 @@ import (
 type Dht struct {
 	routing      *Routing
 	options      DhtOptions
-	hash         string
+	hash         []byte
 	running      bool
 	store        map[string]interface{}
 	logger       *logging.Logger
 	server       net.Listener
-	gotBroadcast []string
+	gotBroadcast [][]byte
 }
 
 type DhtOptions struct {
@@ -30,7 +29,7 @@ type DhtOptions struct {
 	Verbose       int
 	Stats         bool
 	Interactif    bool
-	OnStore       func()
+	OnStore       func(Packet) interface{}
 	OnCustomCmd   func(Packet) interface{}
 	OnBroadcast   func(Packet) interface{}
 }
@@ -43,6 +42,10 @@ func New(options DhtOptions) *Dht {
 		store:   make(map[string]interface{}),
 		logger:  logging.MustGetLogger("dht"),
 	}
+
+	gob.Register([]PacketContact{})
+	gob.Register(StoreInst{})
+	gob.Register(CustomCmd{})
 
 	initLogger(res)
 
@@ -104,13 +107,13 @@ func (this *Dht) republish() {
 	this.logger.Debug("Republished", len(this.store))
 }
 
-func (this *Dht) Store(value interface{}) (string, error) {
+func (this *Dht) Store(value interface{}) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
 	err := enc.Encode(value)
 
 	if err != nil {
-		return "", err
+		return []byte{}, err
 	}
 
 	hash := NewHash(buf.Bytes())
@@ -118,284 +121,78 @@ func (this *Dht) Store(value interface{}) (string, error) {
 	return this.StoreAt(hash, value)
 }
 
-func (this *Dht) StoreAt(hash string, value interface{}) (string, error) {
+func (this *Dht) StoreAt(hash []byte, value interface{}) ([]byte, error) {
+	bucket := this.fetchNodes(hash)
+
+	if len(bucket) == 0 {
+		return []byte{}, errors.New("No nodes found")
+	}
+
 	fn := func(node *Node) chan interface{} {
 		return node.Store(hash, value)
 	}
 
-	bucket, _, err := this.fetchNodes(hash, fn)
+	query := NewQuery(hash, fn, this)
 
-	if err != nil {
-		return "", err
-	}
+	res := query.Run().([]*Node)
 
-	if len(bucket) != 0 {
-		var wg sync.WaitGroup
-
-		for _, node := range bucket {
-			wg.Add(1)
-			test := node
-			go func() {
-				<-test.Store(hash, value)
-				wg.Done()
-			}()
-		}
-
-		wg.Wait()
+	if len(res) == 0 {
+		return []byte{}, errors.New("No answers from nodes")
 	}
 
 	return hash, nil
 }
 
-func (this *Dht) Fetch(hash string) (interface{}, error) {
-	// bucket := this.routing.FindNode(hash)
-
+func (this *Dht) Fetch(hash []byte) (interface{}, error) {
 	fn := func(node *Node) chan interface{} {
 		return node.Fetch(hash)
 	}
 
-	_, res, err := this.fetchNodes(hash, fn)
+	query := NewQuery(hash, fn, this)
 
-	if err != nil {
-		return nil, err
-	}
+	res := query.Run()
 
-	if res == nil {
+	switch res.(type) {
+	case []*Node:
 		return nil, errors.New("Not found")
+	default:
 	}
 
 	return res, nil
 }
 
-func (this *Dht) processFoundBucket(hash string, foundNodes []PacketContact, best []*Node, blacklist []*Node, nodeFn func(*Node) chan interface{}) ([]*Node, interface{}, error) {
-	if len(foundNodes) == 0 {
-		return this.performConnectToAll(hash, foundNodes, best, blacklist, nodeFn)
+func (this *Dht) fetchNodes(hash []byte) []*Node {
+	fn := func(node *Node) chan interface{} {
+		return node.FetchNodes(hash)
 	}
 
-	foundNodes = this.filter(foundNodes, func(n PacketContact) bool {
-		return !this.contains(blacklist, n)
-	})
+	query := NewQuery(hash, fn, this)
 
-	foundNodes = this.filter(foundNodes, func(n PacketContact) bool {
-		return !this.contains(best, n)
-	})
-
-	foundNodes = this.filter(foundNodes, func(n PacketContact) bool {
-		return n.Hash != this.hash
-	})
-
-	if len(foundNodes) == 0 {
-		return best, nil, nil
-	}
-
-	lowestDistanceInBest := -1
-
-	for _, n := range best {
-		dist := this.routing.distanceBetwin(hash, n.contact.Hash)
-
-		if dist < lowestDistanceInBest {
-			lowestDistanceInBest = dist
-		}
-	}
-
-	// if lowestDistanceInBest > -1 {
-	// 	foundNodes = this.filter(foundNodes, func(n PacketContact) bool {
-	// 		return this.routing.distanceBetwin(hash, n.Hash) <= lowestDistanceInBest
-	// 	})
-	// }
-
-	if len(foundNodes) == 0 {
-		return best, nil, nil
-	}
-
-	return this.performConnectToAll(hash, foundNodes, best, blacklist, nodeFn)
-}
-
-func (this *Dht) fetchNodes(hash string, nodeFn func(*Node) chan interface{}) ([]*Node, interface{}, error) {
-	return this.fetchNodes_(hash, this.routing.FindNode(hash), []*Node{}, []*Node{}, nodeFn)
-}
-
-func (this *Dht) fetchNodes_(hash string, bucket []*Node, best []*Node, blacklist []*Node, nodeFn func(*Node) chan interface{}) ([]*Node, interface{}, error) {
-	var foundNodes []PacketContact
-
-	if len(bucket) == 0 {
-		return best, nil, nil
-	}
-
-	var wg sync.WaitGroup
-	var resArr []interface{}
-	var mutex sync.RWMutex
-
-	for _, node := range bucket {
-		wg.Add(1)
-		test := node
-		go func() {
-			res := <-nodeFn(test)
-			mutex.Lock()
-			resArr = append(resArr, res)
-			mutex.Unlock()
-			wg.Done()
-		}()
-	}
-
-	wg.Wait()
-
-	for _, res := range resArr {
-		switch res.(type) {
-		case error:
-			// return []*Node{}, nil, res.(error)
-			continue
-		case Packet:
-			if res.(Packet).Header.Command == COMMAND_FOUND {
-				return []*Node{}, res.(Packet).Data, nil
-			}
-
-			switch res.(Packet).Data.(type) {
-			case []PacketContact:
-				toAdd := res.(Packet).Data.([]PacketContact)
-
-				for _, contact := range toAdd {
-					if !this.contactContains(foundNodes, contact) {
-						foundNodes = append(foundNodes, contact)
-					}
-				}
-			}
-		default:
-		}
-	}
-
-	return this.processFoundBucket(hash, foundNodes, best, blacklist, nodeFn)
-}
-
-func (this *Dht) contains(bucket []*Node, node PacketContact) bool {
-	for _, n := range bucket {
-		if node.Hash == n.contact.Hash {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (this *Dht) contactContains(bucket []PacketContact, node PacketContact) bool {
-	for _, n := range bucket {
-		if node.Hash == n.Hash {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (this *Dht) filter(bucket []PacketContact, fn func(PacketContact) bool) []PacketContact {
-	var res []PacketContact
-
-	for _, node := range bucket {
-		if fn(node) {
-			res = append(res, node)
-		}
-	}
-
-	return res
-}
-
-func (this *Dht) performConnectToAll(hash string, foundNodes []PacketContact, best []*Node, blacklist []*Node, nodeFn func(*Node) chan interface{}) ([]*Node, interface{}, error) {
-	connectedNodes, err := this.connectToAll(foundNodes)
-
-	if err != nil {
-		return []*Node{}, nil, err
-	}
-
-	blacklist = append(blacklist, connectedNodes...)
-
-	smalest := len(connectedNodes)
-
-	if smalest > BUCKET_SIZE {
-		smalest = BUCKET_SIZE
-	}
-
-	best = append(best, connectedNodes...)[:smalest]
-
-	return this.fetchNodes_(hash, connectedNodes, best, blacklist, nodeFn)
-}
-
-func (this *Dht) connectToAll(foundNodes []PacketContact) ([]*Node, error) {
-	newBucket := []*Node{}
-
-	for _, foundNode := range foundNodes {
-		n := this.routing.GetNode(foundNode.Hash)
-
-		if n == nil {
-			n = NewNode(this, foundNode.Addr, foundNode.Hash)
-		}
-
-		newBucket = append(newBucket, n)
-	}
-
-	return this.connectBucketAsync(newBucket)
-}
-
-func (this *Dht) connectBucketAsync(bucket []*Node) ([]*Node, error) {
-	var res []*Node
-
-	answers := 0
-
-	if len(bucket) == 0 {
-		return res, nil
-	}
-
-	resArr := []error{}
-	var ws sync.WaitGroup
-	var mutex sync.RWMutex
-
-	for _, node := range bucket {
-		ws.Add(1)
-		tmp := node
-		go func() {
-			err := tmp.Connect()
-			mutex.Lock()
-			resArr = append(resArr, err)
-			mutex.Unlock()
-			ws.Done()
-		}()
-	}
-
-	ws.Wait()
-
-	for i, node := range bucket {
-		answers++
-
-		if resArr[i] != nil {
-			continue
-		}
-
-		res = append(res, node)
-
-		if answers == len(bucket) {
-			return res, nil
-		}
-	}
-
-	return []*Node{}, nil
+	return query.Run().([]*Node)
 }
 
 func (this *Dht) bootstrap() error {
 	this.logger.Debug("Connecting to bootstrap node", this.options.BootstrapAddr)
 
-	bootstrapNode := NewNode(this, this.options.BootstrapAddr, "")
+	bootstrapNode := NewNode(this, this.options.BootstrapAddr, []byte{})
 
 	if err := bootstrapNode.Connect(); err != nil {
 		return err
 	}
 
-	fn := func(node *Node) chan interface{} {
-		return node.FetchNodes(this.hash)
-	}
+	_ = this.fetchNodes(this.hash)
 
-	_, _, err := this.fetchNodes(this.hash, fn)
+	// TODO: fetch one node on each k-bucket
+	// ownHash, _ := hex.DecodeString(NewRandomHash())
+	for i, bucket := range this.routing.buckets {
+		if len(bucket) != 0 {
+			continue
+		}
 
-	if err != nil {
-		return err
+		h := NewRandomHash()
+		h = this.routing.nCopy(h, this.hash, i)
+
+		_ = this.fetchNodes(h)
 	}
 
 	this.logger.Info("Ready...")
@@ -424,7 +221,14 @@ func (this *Dht) Start() error {
 
 	this.server = l
 
-	this.logger.Info("Listening on " + this.options.ListenAddr)
+	go func() {
+		this.logger.Info("Listening on " + this.options.ListenAddr)
+
+		if err := this.loop(); err != nil {
+			this.running = false
+			this.logger.Error("Main loop: " + err.Error())
+		}
+	}()
 
 	this.running = true
 
@@ -437,13 +241,6 @@ func (this *Dht) Start() error {
 			go this.Cli()
 		}
 	}
-
-	go func() {
-		if err := this.loop(); err != nil {
-			this.running = false
-			this.logger.Error("Main loop: " + err.Error())
-		}
-	}()
 
 	return nil
 }
@@ -476,7 +273,7 @@ func (this *Dht) Stop() {
 
 func (this *Dht) newConnection(conn net.Conn) {
 	socket := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
-	node := NewNodeSocket(this, conn.RemoteAddr().String(), "", socket)
+	node := NewNodeSocket(this, conn.RemoteAddr().String(), []byte{}, socket)
 
 	err := node.Attach()
 
@@ -499,8 +296,32 @@ func (this *Dht) CustomCmd(data interface{}) {
 	}
 }
 
+func (this *Dht) hasBroadcast(hash []byte) bool {
+	for _, h := range this.gotBroadcast {
+		if compare(h, hash) == 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+func compare(hash1, hash2 []byte) int {
+	if len(hash1) != len(hash2) {
+		return len(hash1) - len(hash2)
+	}
+
+	for i, v := range hash1 {
+		if v != hash2[i] {
+			return int(v) - int(hash2[i])
+		}
+	}
+
+	return 0
+}
+
 func (this *Dht) Broadcast(data interface{}) {
-	bucket := this.routing.GetAllNodes()
+	bucket := this.routing.FindNode(this.hash)
 
 	var packet Packet
 	switch data.(type) {
@@ -508,13 +329,12 @@ func (this *Dht) Broadcast(data interface{}) {
 		packet = data.(Packet)
 	default:
 		if len(bucket) > 0 {
-			packet = bucket[0].newPacket(COMMAND_BROADCAST, "", data)
+			packet = bucket[0].newPacket(COMMAND_BROADCAST, []byte{}, data)
 		}
 	}
 
 	for _, node := range bucket {
 		node.Broadcast(packet)
-		time.Sleep(time.Millisecond * 100)
 	}
 }
 
@@ -542,4 +362,8 @@ func (this *Dht) OnBroadcast(packet Packet) interface{} {
 	}
 
 	return nil
+}
+
+func (this *Dht) GetConnectedNumber() int {
+	return this.routing.Size()
 }

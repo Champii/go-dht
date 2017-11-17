@@ -3,6 +3,7 @@ package dht
 import (
 	"bufio"
 	"encoding/gob"
+	"encoding/hex"
 	"errors"
 	"log"
 	"net"
@@ -42,11 +43,10 @@ type Node struct {
 	commandQueue map[string]CallbackChan
 	listening    bool
 	dht          *Dht
-	bus          chan Packet
 }
 
 type PacketContact struct {
-	Hash string
+	Hash []byte
 	Addr string
 }
 
@@ -54,8 +54,8 @@ type PacketHeader struct {
 	DateSent    int64
 	Command     int
 	Sender      PacketContact
-	ResponseTo  string
-	MessageHash string
+	ResponseTo  []byte
+	MessageHash []byte
 }
 
 type Packet struct {
@@ -64,7 +64,7 @@ type Packet struct {
 }
 
 type StoreInst struct {
-	Hash string
+	Hash []byte
 	Data interface{}
 }
 
@@ -73,13 +73,13 @@ type CustomCmd struct {
 	Data    interface{}
 }
 
-func (this *Node) newPacket(command int, responseTo string, data interface{}) Packet {
+func (this *Node) newPacket(command int, responseTo []byte, data interface{}) Packet {
 	packet := Packet{
 		Header: PacketHeader{
 			DateSent:    time.Now().UnixNano(),
 			Command:     command,
 			ResponseTo:  responseTo,
-			MessageHash: "",
+			MessageHash: []byte{},
 			Sender: PacketContact{
 				Addr: this.dht.options.ListenAddr,
 				Hash: this.dht.hash,
@@ -87,10 +87,6 @@ func (this *Node) newPacket(command int, responseTo string, data interface{}) Pa
 		},
 		Data: data,
 	}
-
-	gob.Register([]PacketContact{})
-	gob.Register(StoreInst{})
-	gob.Register(CustomCmd{})
 
 	tmp, err := msgpack.Marshal(&packet)
 
@@ -103,7 +99,7 @@ func (this *Node) newPacket(command int, responseTo string, data interface{}) Pa
 	return packet
 }
 
-func NewNode(dht *Dht, addr string, hash string) *Node {
+func NewNode(dht *Dht, addr string, hash []byte) *Node {
 	return &Node{
 		dht:          dht,
 		listening:    false,
@@ -116,7 +112,7 @@ func NewNode(dht *Dht, addr string, hash string) *Node {
 	}
 }
 
-func NewNodeSocket(dht *Dht, addr string, hash string, socket *bufio.ReadWriter) *Node {
+func NewNodeSocket(dht *Dht, addr string, hash []byte, socket *bufio.ReadWriter) *Node {
 	node := NewNode(dht, addr, hash)
 
 	node.socket = socket
@@ -129,7 +125,7 @@ func (this *Node) Redacted() interface{} {
 		return this.contact.Addr
 	}
 
-	return this.contact.Hash[:16]
+	return hex.EncodeToString(this.contact.Hash)[:16]
 }
 
 func (this *Node) Attach() error {
@@ -139,19 +135,15 @@ func (this *Node) Attach() error {
 }
 
 func (this *Node) Connect() error {
-	this.dht.logger.Debug(this, ". Connect")
-
 	if this.listening {
-		this.dht.logger.Debug(this, "x Already listening...")
-
 		return nil
 	}
 
 	if this.socket != nil {
-		this.dht.logger.Warning(this, "x Is already connected...")
-
 		return this.Attach()
 	}
+
+	this.dht.logger.Debug(this, ". Connect")
 
 	conn, err := net.Dial("tcp", this.contact.Addr)
 
@@ -200,13 +192,15 @@ func (this *Node) loop() {
 
 			if len(packet.Header.ResponseTo) > 0 {
 				this.Lock()
-				cb, ok := this.commandQueue[packet.Header.ResponseTo]
+				cb, ok := this.commandQueue[hex.EncodeToString(packet.Header.ResponseTo)]
 				this.Unlock()
 
 				if !ok {
 					this.dht.logger.Error(this, "x Unknown response: ", packet.Header.ResponseTo, packet)
 					continue
 				}
+
+				cb.timer.Stop()
 
 				switch packet.Header.Command {
 				case COMMAND_NOOP:
@@ -228,8 +222,9 @@ func (this *Node) loop() {
 					continue
 				}
 
+				close(cb.c)
 				this.Lock()
-				delete(this.commandQueue, packet.Header.ResponseTo)
+				delete(this.commandQueue, hex.EncodeToString(packet.Header.ResponseTo))
 				this.Unlock()
 			} else {
 				switch packet.Header.Command {
@@ -259,7 +254,7 @@ func (this *Node) loop() {
 func (this *Node) Ping() chan interface{} {
 	this.dht.logger.Debug(this, "< PING")
 
-	return this.send(this.newPacket(COMMAND_PING, "", nil))
+	return this.send(this.newPacket(COMMAND_PING, []byte{}, nil))
 }
 
 func (this *Node) OnPing(packet Packet) {
@@ -275,7 +270,7 @@ func (this *Node) OnPing(packet Packet) {
 	this.Pong(packet.Header.MessageHash)
 }
 
-func (this *Node) Pong(responseTo string) chan interface{} {
+func (this *Node) Pong(responseTo []byte) chan interface{} {
 	this.dht.logger.Debug(this, "< PONG")
 
 	data := this.newPacket(COMMAND_PONG, responseTo, nil)
@@ -296,18 +291,18 @@ func (this *Node) OnPong(packet Packet, cb CallbackChan) {
 	cb.c <- nil
 }
 
-func (this *Node) Fetch(hash string) chan interface{} {
-	this.dht.logger.Debug(this, "< FETCH", hash[:16])
+func (this *Node) Fetch(hash []byte) chan interface{} {
+	this.dht.logger.Debug(this, "< FETCH", hex.EncodeToString(hash)[:16])
 
-	data := this.newPacket(COMMAND_FETCH, "", hash)
+	data := this.newPacket(COMMAND_FETCH, []byte{}, hash)
 
 	return this.send(data)
 }
 
 func (this *Node) OnFetch(packet Packet) {
-	this.dht.logger.Debug(this, "> FETCH", packet.Data.(string)[:16])
+	this.dht.logger.Debug(this, "> FETCH", hex.EncodeToString(packet.Data.([]byte))[:16])
 
-	val, ok := this.dht.store[packet.Data.(string)]
+	val, ok := this.dht.store[hex.EncodeToString(packet.Data.([]byte))]
 
 	if ok {
 		this.Found(packet, val)
@@ -317,18 +312,18 @@ func (this *Node) OnFetch(packet Packet) {
 	this.OnFetchNodes(packet)
 }
 
-func (this *Node) FetchNodes(hash string) chan interface{} {
-	this.dht.logger.Debug(this, "< FETCH NODES", hash[:16])
+func (this *Node) FetchNodes(hash []byte) chan interface{} {
+	this.dht.logger.Debug(this, "< FETCH NODES", hex.EncodeToString(hash)[:16])
 
-	data := this.newPacket(COMMAND_FETCH_NODES, "", hash)
+	data := this.newPacket(COMMAND_FETCH_NODES, []byte{}, hash)
 
 	return this.send(data)
 }
 
 func (this *Node) OnFetchNodes(packet Packet) {
-	this.dht.logger.Debug(this, "> FETCH NODES", packet.Data.(string)[:16])
+	this.dht.logger.Debug(this, "> FETCH NODES", hex.EncodeToString(packet.Data.([]byte))[:16])
 
-	bucket := this.dht.routing.FindNode(packet.Data.(string))
+	bucket := this.dht.routing.FindNode(packet.Data.([]byte))
 
 	var nodesContact []PacketContact
 
@@ -367,10 +362,10 @@ func (this *Node) OnFound(packet Packet, done CallbackChan) {
 	done.c <- packet
 }
 
-func (this *Node) Store(hash string, value interface{}) chan interface{} {
-	this.dht.logger.Debug(this, "< STORE", hash[:16], value)
+func (this *Node) Store(hash []byte, value interface{}) chan interface{} {
+	this.dht.logger.Debug(this, "< STORE", hex.EncodeToString(hash)[:16], value)
 
-	data := this.newPacket(COMMAND_STORE, "", StoreInst{Hash: hash, Data: value})
+	data := this.newPacket(COMMAND_STORE, []byte{}, StoreInst{Hash: hash, Data: value})
 
 	return this.send(data)
 }
@@ -378,28 +373,7 @@ func (this *Node) Store(hash string, value interface{}) chan interface{} {
 func (this *Node) OnStore(packet Packet) {
 	this.dht.logger.Debug(this, "> STORE", packet.Data.(StoreInst).Hash, packet.Data.(StoreInst).Data)
 
-	// fn := func(node *Node) chan interface{} {
-	// 	return node.FetchNodes(packet.Data.(StoreInst).Hash)
-	// }
-
-	// this.dht.fetchNodes(packet.Data.(StoreInst).Hash, fn)
-
-	// todo: check if best eligible
-	ok, bucket := this.dht.routing.IsBestStorage(packet.Data.(StoreInst).Hash)
-
-	if !ok {
-		var nodesContact []PacketContact
-
-		for _, node := range bucket {
-			nodesContact = append(nodesContact, node.contact)
-		}
-
-		this.FoundNodes(packet, nodesContact)
-
-		return
-	}
-
-	this.dht.store[packet.Data.(StoreInst).Hash] = packet.Data.(StoreInst).Data
+	this.dht.store[hex.EncodeToString(packet.Data.(StoreInst).Hash)] = packet.Data.(StoreInst).Data
 
 	this.Stored(packet)
 }
@@ -421,7 +395,7 @@ func (this *Node) OnStored(packet Packet, done CallbackChan) {
 func (this *Node) Custom(value interface{}) chan interface{} {
 	this.dht.logger.Debug(this, "< CUSTOM")
 
-	data := this.newPacket(COMMAND_CUSTOM, "", value)
+	data := this.newPacket(COMMAND_CUSTOM, []byte{}, value)
 
 	return this.send(data)
 }
@@ -444,32 +418,21 @@ func (this *Node) OnCustomAnswer(packet Packet, done CallbackChan) {
 	this.dht.logger.Debug(this, "> CUSTOM ANSWER")
 
 	done.c <- packet
-
-}
-
-func (this *Node) hasBroadcast(hash string) bool {
-	for _, h := range this.dht.gotBroadcast {
-		if h == hash {
-			return true
-		}
-	}
-
-	return false
 }
 
 func (this *Node) Broadcast(packet Packet) chan interface{} {
-	this.dht.logger.Debug(this, "< BROADCAST")
-
-	if !this.hasBroadcast(packet.Header.MessageHash) {
+	if !this.dht.hasBroadcast(packet.Header.MessageHash) {
 		this.dht.gotBroadcast = append(this.dht.gotBroadcast, packet.Header.MessageHash)
 	}
+
+	this.dht.logger.Debug(this, "< BROADCAST")
 	// data := this.newPacket(COMMAND_BROADCAST, "", value)
 
 	return this.send(packet)
 }
 
 func (this *Node) OnBroadcast(packet Packet) {
-	if this.hasBroadcast(packet.Header.MessageHash) {
+	if this.dht.hasBroadcast(packet.Header.MessageHash) {
 		return
 	}
 
@@ -501,7 +464,7 @@ func (this *Node) send(packet Packet) chan interface{} {
 
 	timer := time.NewTimer(time.Second * 5)
 
-	this.commandQueue[packet.Header.MessageHash] = CallbackChan{
+	this.commandQueue[hex.EncodeToString(packet.Header.MessageHash)] = CallbackChan{
 		timer: timer,
 		c:     res,
 	}
@@ -510,23 +473,25 @@ func (this *Node) send(packet Packet) chan interface{} {
 		<-timer.C
 
 		this.Lock()
-		delete(this.commandQueue, packet.Header.MessageHash)
+		delete(this.commandQueue, hex.EncodeToString(packet.Header.MessageHash))
 		this.Unlock()
 
 		var err string
 
 		if len(this.contact.Hash) > 0 {
-			err = this.contact.Hash[:16] + " Timeout"
+			err = hex.EncodeToString(this.contact.Hash[:16]) + " Timeout"
 		} else {
 			err = this.contact.Addr + " Timeout"
 		}
 
 		res <- errors.New(err)
+
+		close(res)
 	}()
 
 	this.socket.Flush()
 
-	return this.commandQueue[packet.Header.MessageHash].c
+	return this.commandQueue[hex.EncodeToString(packet.Header.MessageHash)].c
 }
 
 func (this *Node) disconnect() {

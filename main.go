@@ -52,12 +52,12 @@ COPYRIGHT:
 
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
-			Name:  "b, bootstrap",
+			Name:  "c, connect",
 			Usage: "Connect to bootstrap node ip:port",
 		},
 		cli.StringFlag{
-			Name:  "p, port",
-			Usage: "Listening port",
+			Name:  "l, listen",
+			Usage: "Listening address and port",
 			Value: "0.0.0.0:3000",
 		},
 		cli.BoolFlag{
@@ -67,10 +67,6 @@ COPYRIGHT:
 		cli.BoolFlag{
 			Name:  "s",
 			Usage: "Stat mode",
-		},
-		cli.BoolFlag{
-			Name:  "q, quiet",
-			Usage: "Quiet",
 		},
 		cli.IntFlag{
 			Name:  "n, network",
@@ -94,15 +90,17 @@ func manageArgs() {
 
 	app.Action = func(c *cli.Context) error {
 		options := dht.DhtOptions{
-			ListenAddr:    c.String("p"),
-			BootstrapAddr: c.String("b"),
+			ListenAddr:    c.String("l"),
+			BootstrapAddr: c.String("c"),
 			Verbose:       c.Int("v"),
 			Stats:         c.Bool("s"),
 			Interactif:    c.Bool("i"),
-			OnStore:       func() {},
+			// OnStore:       func(dht.Packet) interface{} {},
 		}
 
 		if c.Int("n") > 0 {
+			options.Stats = false
+
 			cluster(c.Int("n"), options)
 
 			return nil

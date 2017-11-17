@@ -99,14 +99,15 @@ func main() {
 
 # Todo
 
+- keep old blocks in bucket (keep it sorted tho)
 - Little sleep on republish and little range in timer
-- Fix bug with store that does not work well when not enough nodes
 - Performances (better algo)
 - Avoid value change rewrite
 - BlackList for bad nodes (too many bad or incorrect answers)
-- Query object to symbolise a query on the network (allows to factorise code from Dht and keep only public methods on it)
 - Custom commands
 - Broadcast
 - Cryptography ?
 - Mirror Node (keeps all keys he finds)
 - Proxy Node (for NAT Traversal)
+- Debug Node that gets all infos from every nodes (Add a debug mode to do so)
+- UDP instead of TCP ?

@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"encoding/gob"
 	"encoding/hex"
-	// "math/rand"
+	"math/rand"
 	"errors"
 	"net"
 	"os"

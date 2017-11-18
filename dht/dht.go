@@ -1,10 +1,12 @@
 package dht
 
 import (
+	"sync"
 	"bufio"
 	"bytes"
 	"encoding/gob"
 	"encoding/hex"
+	// "math/rand"
 	"errors"
 	"net"
 	"os"
@@ -14,6 +16,7 @@ import (
 )
 
 type Dht struct {
+	sync.RWMutex
 	routing      *Routing
 	options      DhtOptions
 	hash         []byte
@@ -54,7 +57,10 @@ func New(options DhtOptions) *Dht {
 
 	res.logger.Debug("DHT version 0.0.1")
 
-	timer := time.NewTicker(time.Minute * 15)
+	// r := rand.Intn(30)
+	// timer := time.NewTicker(time.Minute * 10 + (time.Second * time.Duration(r)))
+	// r := rand.Intn(30)
+	timer := time.NewTicker(time.Minute)
 
 	go func() {
 		for range timer.C {
@@ -100,8 +106,9 @@ func initLogger(dht *Dht) {
 }
 
 func (this *Dht) republish() {
-	for _, v := range this.store {
-		this.Store(v)
+	for k, v := range this.store {
+		h, _ := hex.DecodeString(k)
+		this.StoreAt(h, v)
 		time.Sleep(time.Millisecond * 100)
 	}
 

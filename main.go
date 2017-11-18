@@ -71,7 +71,7 @@ COPYRIGHT:
 		cli.IntFlag{
 			Name:  "n, network",
 			Value: 0,
-			Usage: "Spawn X new `nodes` network.",
+			Usage: "Spawn X new `nodes` in a network.",
 		},
 		cli.IntFlag{
 			Name:  "v, verbose",

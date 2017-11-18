@@ -128,8 +128,7 @@ func (*Dht) StoredKeys() int
 ## Todo
 
 - Give some keys to newly connected
-- keep old blocks in bucket (keep it sorted tho)
-- Little sleep on republish and little range in timer
+- keep old nodes in bucket (keep it sorted tho)
 - Performances (better algo)
 - BlackList for bad nodes (too many bad or incorrect answers)
 - Cryptography ?

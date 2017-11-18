@@ -373,20 +373,23 @@ func (this *Node) Store(hash []byte, value interface{}) chan interface{} {
 func (this *Node) OnStore(packet Packet) {
 	this.dht.logger.Debug(this, "> STORE", packet.Data.(StoreInst).Hash, packet.Data.(StoreInst).Data)
 
+	this.dht.Lock()
 	_, ok := this.dht.store[hex.EncodeToString(packet.Data.(StoreInst).Hash)]
 
-	if ok || this.dht.options.OnStore(packet) {
+	if ok || !this.dht.options.OnStore(packet) {
+		this.dht.Unlock()
 		this.Stored(packet, false)
 		return
 	}
 
 	this.dht.store[hex.EncodeToString(packet.Data.(StoreInst).Hash)] = packet.Data.(StoreInst).Data
+	this.dht.Unlock()
 
 	this.Stored(packet, true)
 }
 
 func (this *Node) Stored(packet Packet, hasStored bool) {
-	this.dht.logger.Debug(this, "< STORED")
+	this.dht.logger.Debug(this, "< STORED", hasStored)
 
 	data := this.newPacket(COMMAND_STORED, packet.Header.MessageHash, hasStored)
 

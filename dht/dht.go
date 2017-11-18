@@ -57,10 +57,8 @@ func New(options DhtOptions) *Dht {
 
 	res.logger.Debug("DHT version 0.0.1")
 
-	// r := rand.Intn(30)
-	// timer := time.NewTicker(time.Minute * 10 + (time.Second * time.Duration(r)))
-	// r := rand.Intn(30)
-	timer := time.NewTicker(time.Minute)
+	r := rand.Intn(60) - 60
+	timer := time.NewTicker(time.Minute * 10 + (time.Second * time.Duration(r)))
 
 	go func() {
 		for range timer.C {

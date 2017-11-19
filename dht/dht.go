@@ -28,14 +28,15 @@ type Dht struct {
 }
 
 type DhtOptions struct {
-	ListenAddr    string
-	BootstrapAddr string
-	Verbose       int
-	Stats         bool
-	Interactif    bool
-	OnStore       func(Packet) bool
-	OnCustomCmd   func(Packet) interface{}
-	OnBroadcast   func(Packet) interface{}
+	NoRepublishOnExit  bool
+	ListenAddr         string
+	BootstrapAddr      string
+	Verbose            int
+	Stats              bool
+	Interactif         bool
+	OnStore            func(Packet) bool
+	OnCustomCmd        func(Packet) interface{}
+	OnBroadcast        func(Packet) interface{}
 }
 
 func New(options DhtOptions) *Dht {
@@ -107,7 +108,6 @@ func (this *Dht) republish() {
 	for k, v := range this.store {
 		h, _ := hex.DecodeString(k)
 		this.StoreAt(h, v)
-		time.Sleep(time.Millisecond * 100)
 	}
 
 	this.logger.Debug("Republished", len(this.store))
@@ -271,6 +271,10 @@ func (this *Dht) loop() error {
 		conn, err := this.server.Accept()
 
 		if err != nil {
+			if  this.running == false {
+				return nil
+			}
+
 			return errors.New("Error accepting:" + err.Error())
 		}
 
@@ -285,7 +289,14 @@ func (this *Dht) Stop() {
 		return
 	}
 
+	if !this.options.NoRepublishOnExit {
+		this.republish()
+	}
+
 	this.running = false
+
+	this.server.Close()
+
 }
 
 func (this *Dht) newConnection(conn net.Conn) {
@@ -379,6 +390,14 @@ func (this *Dht) onBroadcast(packet Packet) interface{} {
 	}
 
 	return nil
+}
+
+func (this *Dht) onStore(packet Packet) bool {
+	if this.options.OnStore != nil {
+		return this.options.OnStore(packet)
+	}
+
+	return true
 }
 
 func (this *Dht) GetConnectedNumber() int {

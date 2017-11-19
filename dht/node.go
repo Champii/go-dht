@@ -193,14 +193,15 @@ func (this *Node) loop() {
 			if len(packet.Header.ResponseTo) > 0 {
 				this.Lock()
 				cb, ok := this.commandQueue[hex.EncodeToString(packet.Header.ResponseTo)]
-				this.Unlock()
 
 				if !ok {
 					this.dht.logger.Error(this, "x Unknown response: ", packet.Header.ResponseTo, packet)
+					this.Unlock()
 					continue
 				}
 
 				cb.timer.Stop()
+				this.Unlock()
 
 				switch packet.Header.Command {
 				case COMMAND_NOOP:
@@ -222,8 +223,8 @@ func (this *Node) loop() {
 					continue
 				}
 
-				close(cb.c)
 				this.Lock()
+				close(cb.c)
 				delete(this.commandQueue, hex.EncodeToString(packet.Header.ResponseTo))
 				this.Unlock()
 			} else {
@@ -376,7 +377,7 @@ func (this *Node) OnStore(packet Packet) {
 	this.dht.Lock()
 	_, ok := this.dht.store[hex.EncodeToString(packet.Data.(StoreInst).Hash)]
 
-	if ok || !this.dht.options.OnStore(packet) {
+	if ok || !this.dht.onStore(packet) {
 		this.dht.Unlock()
 		this.Stored(packet, false)
 		return

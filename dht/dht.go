@@ -1,15 +1,15 @@
 package dht
 
 import (
-	"sync"
 	"bufio"
 	"bytes"
 	"encoding/gob"
 	"encoding/hex"
-	"math/rand"
 	"errors"
+	"math/rand"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	logging "github.com/op/go-logging"
@@ -28,15 +28,16 @@ type Dht struct {
 }
 
 type DhtOptions struct {
-	NoRepublishOnExit  bool
-	ListenAddr         string
-	BootstrapAddr      string
-	Verbose            int
-	Stats              bool
-	Interactif         bool
-	OnStore            func(Packet) bool
-	OnCustomCmd        func(Packet) interface{}
-	OnBroadcast        func(Packet) interface{}
+	NoRepublishOnExit bool
+	ListenAddr        string
+	BootstrapAddr     string
+	Verbose           int
+	Cluster           int
+	Stats             bool
+	Interactif        bool
+	OnStore           func(Packet) bool
+	OnCustomCmd       func(Packet) interface{}
+	OnBroadcast       func(Packet) interface{}
 }
 
 func New(options DhtOptions) *Dht {
@@ -59,7 +60,7 @@ func New(options DhtOptions) *Dht {
 	res.logger.Debug("DHT version 0.0.1")
 
 	r := rand.Intn(60) - 60
-	timer := time.NewTicker(time.Minute * 10 + (time.Second * time.Duration(r)))
+	timer := time.NewTicker(time.Minute*10 + (time.Second * time.Duration(r)))
 
 	go func() {
 		for range timer.C {
@@ -271,7 +272,7 @@ func (this *Dht) loop() error {
 		conn, err := this.server.Accept()
 
 		if err != nil {
-			if  this.running == false {
+			if this.running == false {
 				return nil
 			}
 

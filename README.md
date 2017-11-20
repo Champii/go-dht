@@ -127,8 +127,10 @@ func (*Dht) StoredKeys() int
 
 ## Todo
 
+- Refuse connection from nodes when the hash exists already in routing
+- Storage spread when high demand (with timeout decay with distance over best storage)
 - Give some keys to newly connected
-- keep old nodes in bucket (keep it sorted tho)
+- keep old nodes in bucket (keep it sorted tho) + spare list for excedent
 - Performances (better algo)
 - BlackList for bad nodes (too many bad or incorrect answers)
 - Cryptography ?

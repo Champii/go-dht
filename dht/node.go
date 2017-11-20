@@ -498,6 +498,8 @@ func (this *Node) send(packet Packet) chan interface{} {
 		res <- errors.New(err)
 
 		close(res)
+
+		this.disconnect()
 	}()
 
 	this.socket.Flush()
@@ -507,4 +509,9 @@ func (this *Node) send(packet Packet) chan interface{} {
 
 func (this *Node) disconnect() {
 	this.dht.routing.RemoveNode(this)
+
+	for _, res := range this.commandQueue {
+		res.timer.Stop()
+		close(res.c)
+	}
 }

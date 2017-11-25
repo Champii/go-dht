@@ -2,6 +2,7 @@ package dht
 
 import "sort"
 import "fmt"
+import "net"
 
 type QueryJob func(*Node) chan interface{}
 
@@ -108,11 +109,15 @@ func (this *Query) processContact(contact PacketContact) {
 		return
 	}
 
-	n := NewNode(this.dht, contact.Addr, contact.Hash)
+	addr, err := net.ResolveUDPAddr("udp", contact.Addr)
 
-	if err := n.Connect(); err != nil {
+	if err != nil {
 		return
 	}
+
+	n := NewNode(this.dht, addr, contact.Hash)
+
+	this.dht.routing.AddNode(n)
 
 	this.blacklist = append(this.blacklist, n)
 

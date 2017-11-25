@@ -46,7 +46,6 @@ func exitProperly(client *dht.Dht) {
 func cluster(options dht.DhtOptions) {
 	network := []*dht.Dht{}
 	i := 0
-
 	if len(options.BootstrapAddr) == 0 {
 		client := startOne(options)
 

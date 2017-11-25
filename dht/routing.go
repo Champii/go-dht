@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
+	"net"
 	"sync"
 )
 
@@ -51,6 +52,10 @@ func (this *Routing) Size() int {
 }
 
 func (this *Routing) countSameBit(hash []byte) int {
+	if len(hash) == 0 {
+		return 0
+	}
+
 	count := 0
 	for i, v := range this.dht.hash {
 		for j := 0; j < 8; j++ {
@@ -101,9 +106,7 @@ func (this *Routing) distanceBetwin(hash1, hash2 []byte) int {
 }
 
 func (this *Routing) AddNode(node *Node) {
-	if this.GetNode(node.contact.Hash) != nil {
-		this.dht.logger.Debug(node, "x Routing already has this node")
-
+	if this.GetNode(node.contact.Hash) != nil || this.GetByAddr(node.addr) != nil {
 		return
 	}
 
@@ -256,4 +259,16 @@ func (this *Routing) GetAllNodes() []*Node {
 	}
 
 	return res
+}
+
+func (this *Routing) GetByAddr(addr net.Addr) *Node {
+	for i := 0; i < BUCKET_SIZE; i++ {
+		for _, node := range this.buckets[i] {
+			if node.addr.String() == addr.String() {
+				return node
+			}
+		}
+	}
+
+	return nil
 }

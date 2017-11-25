@@ -56,7 +56,7 @@ COPYRIGHT:
 		cli.StringFlag{
 			Name:  "l, listen",
 			Usage: "Listening address and port",
-			Value: "0.0.0.0:3000",
+			Value: ":3000",
 		},
 		cli.BoolFlag{
 			Name:  "i",
@@ -100,8 +100,6 @@ func parseArgs(done func(dht.DhtOptions)) {
 		if options.Cluster > 0 {
 			options.Stats = false
 			options.Interactif = false
-
-			return nil
 		}
 
 		if options.Interactif {
@@ -109,6 +107,7 @@ func parseArgs(done func(dht.DhtOptions)) {
 		}
 
 		done(options)
+
 		return nil
 	}
 

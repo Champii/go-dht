@@ -1,7 +1,6 @@
 package dht
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/gob"
 	"encoding/hex"
@@ -23,7 +22,7 @@ type Dht struct {
 	running      bool
 	store        map[string]interface{}
 	logger       *logging.Logger
-	server       net.Listener
+	server       net.PacketConn
 	gotBroadcast [][]byte
 }
 
@@ -192,11 +191,16 @@ func (this *Dht) fetchNodes(hash []byte) []*Node {
 func (this *Dht) bootstrap() error {
 	this.logger.Debug("Connecting to bootstrap node", this.options.BootstrapAddr)
 
-	bootstrapNode := NewNode(this, this.options.BootstrapAddr, []byte{})
+	addr, err := net.ResolveUDPAddr("udp", this.options.BootstrapAddr)
 
-	if err := bootstrapNode.Connect(); err != nil {
+	if err != nil {
 		return err
 	}
+
+	bootstrapNode := NewNode(this, addr, []byte{})
+
+	this.routing.AddNode(bootstrapNode)
+	<-bootstrapNode.Ping()
 
 	_ = this.fetchNodes(this.hash)
 
@@ -229,9 +233,9 @@ func (this *Dht) Start() error {
 
 	this.hash = NewRandomHash()
 
-	this.logger.Debug("Own hash", this.hash)
+	this.logger.Debug("Own hash", hex.EncodeToString(this.hash))
 
-	l, err := net.Listen("tcp", this.options.ListenAddr)
+	l, err := net.ListenPacket("udp", this.options.ListenAddr)
 
 	if err != nil {
 		return errors.New("Error listening:" + err.Error())
@@ -269,17 +273,19 @@ func (this *Dht) loop() error {
 	defer this.server.Close()
 
 	for this.running {
-		conn, err := this.server.Accept()
+		var packet [4096]byte
+
+		_, addr, err := this.server.ReadFrom(packet[0:])
 
 		if err != nil {
 			if this.running == false {
 				return nil
 			}
 
-			return errors.New("Error accepting:" + err.Error())
+			return errors.New("Error reading:" + err.Error())
 		}
 
-		go this.newConnection(conn)
+		this.handleInPacket(addr, packet[0:])
 	}
 
 	return nil
@@ -300,17 +306,42 @@ func (this *Dht) Stop() {
 
 }
 
-func (this *Dht) newConnection(conn net.Conn) {
-	socket := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
-	node := NewNodeSocket(this, conn.RemoteAddr().String(), []byte{}, socket)
+func (this *Dht) handleInPacket(addr net.Addr, blob_ []byte) {
+	var packet Packet
 
-	err := node.Attach()
+	var blob bytes.Buffer
+	blob.Write(blob_)
+
+	dec := gob.NewDecoder(&blob)
+
+	err := dec.Decode(&packet)
 
 	if err != nil {
-		this.logger.Error("Error attach", err.Error())
+		this.logger.Warning("Invalid packet")
 
 		return
 	}
+
+	var node *Node
+	if len(packet.Header.Sender.Hash) > 0 {
+		node = this.routing.GetNode(packet.Header.Sender.Hash)
+	}
+
+	if node == nil {
+		addr, err := net.ResolveUDPAddr("udp", packet.Header.Sender.Addr)
+
+		if err == nil {
+			node = this.routing.GetByAddr(addr)
+		}
+	}
+
+	if node == nil {
+		node = NewNode(this, addr, packet.Header.Sender.Hash)
+
+		this.routing.AddNode(node)
+	}
+
+	node.HandleInPacket(packet)
 }
 
 func (this *Dht) Logger() *logging.Logger {

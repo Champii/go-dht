@@ -113,14 +113,6 @@ func NewNode(dht *Dht, addr net.Addr, hash []byte) *Node {
 	}
 }
 
-// func NewNodeSocket(dht *Dht, addr string, hash []byte, socket *bufio.ReadWriter) *Node {
-// 	node := NewNode(dht, addr, hash)
-
-// 	node.socket = socket
-
-// 	return node
-// }
-
 func (this *Node) Redacted() interface{} {
 	if len(this.contact.Hash) == 0 {
 		return this.contact.Addr
@@ -128,47 +120,6 @@ func (this *Node) Redacted() interface{} {
 
 	return hex.EncodeToString(this.contact.Hash)[:16]
 }
-
-// func (this *Node) Attach() error {
-// this.loop()
-
-// 	return nil
-// }
-
-// func (this *Node) Connect() error {
-// 	if this.listening {
-// 		return nil
-// 	}
-
-// 	if this.socket != nil {
-// 		return this.Attach()
-// 	}
-
-// 	this.dht.logger.Debug(this, ". Connect")
-
-// 	conn, err := net.Dial("tcp", this.contact.Addr)
-
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	this.socket = bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
-
-// 	this.loop()
-
-// 	promise := this.Ping()
-
-// 	res := <-promise
-
-// 	switch res.(type) {
-// 	case error:
-// 		return res.(error)
-// 	default:
-// 	}
-
-// 	this.dht.logger.Debug(this, "o Connected")
-// 	return nil
-// }
 
 func (this *Node) HandleInPacket(packet Packet) {
 	if len(packet.Header.ResponseTo) > 0 {
@@ -230,89 +181,6 @@ func (this *Node) HandleInPacket(packet Packet) {
 	}
 
 }
-
-// func (this *Node) loop() {
-// 	go (func() {
-// 		this.listening = true
-
-// 		for {
-// 			var packet Packet
-
-// 			dec := gob.NewDecoder(this.socket)
-
-// 			err := dec.Decode(&packet)
-
-// 			if err != nil {
-// 				if err.Error() == "EOF" {
-// 					this.disconnect()
-
-// 					return
-// 				}
-
-// 				this.dht.logger.Error(this, "x Error reading", err.Error())
-// 			}
-
-// 			if len(packet.Header.ResponseTo) > 0 {
-// 				this.Lock()
-// 				cb, ok := this.commandQueue[hex.EncodeToString(packet.Header.ResponseTo)]
-
-// 				if !ok {
-// 					this.dht.logger.Error(this, "x Unknown response: ", packet.Header.ResponseTo, packet)
-// 					this.Unlock()
-// 					continue
-// 				}
-
-// 				cb.timer.Stop()
-// 				this.Unlock()
-
-// 				switch packet.Header.Command {
-// 				case COMMAND_NOOP:
-// 					this.dht.logger.Debug(this, "> NOOP")
-// 					cb.c <- packet
-// 				case COMMAND_PONG:
-// 					this.OnPong(packet, cb)
-// 				case COMMAND_FOUND:
-// 					this.OnFound(packet, cb)
-// 				case COMMAND_FOUND_NODES:
-// 					this.OnFoundNodes(packet, cb)
-// 				case COMMAND_STORED:
-// 					this.OnStored(packet, cb)
-// 				case COMMAND_CUSTOM_ANSWER:
-// 					this.OnCustomAnswer(packet, cb)
-
-// 				default:
-// 					this.dht.logger.Error(this, "x answer: UNKNOWN COMMAND", packet.Header.Command)
-// 					continue
-// 				}
-
-// 				this.Lock()
-// 				close(cb.c)
-// 				delete(this.commandQueue, hex.EncodeToString(packet.Header.ResponseTo))
-// 				this.Unlock()
-// 			} else {
-// 				switch packet.Header.Command {
-// 				case COMMAND_NOOP:
-// 				case COMMAND_PING:
-// 					this.OnPing(packet)
-// 				case COMMAND_FETCH:
-// 					this.OnFetch(packet)
-// 				case COMMAND_FETCH_NODES:
-// 					this.OnFetchNodes(packet)
-// 				case COMMAND_BROADCAST:
-// 					this.OnBroadcast(packet)
-// 				case COMMAND_STORE:
-// 					this.OnStore(packet)
-// 				case COMMAND_CUSTOM:
-// 					this.OnCustom(packet)
-// 				default:
-// 					this.dht.logger.Error(this, "x query: UNKNOWN COMMAND", packet.Header.Command)
-// 					continue
-// 				}
-// 			}
-// 		}
-// 		this.listening = false
-// 	})()
-// }
 
 func (this *Node) Ping() chan interface{} {
 	this.dht.logger.Debug(this, "< PING")

@@ -273,7 +273,7 @@ func (this *Dht) loop() error {
 	defer this.server.Close()
 
 	for this.running {
-		var packet [4096]byte
+		var packet [10000]byte
 
 		_, addr, err := this.server.ReadFrom(packet[0:])
 

@@ -176,7 +176,7 @@ func (this *Node) HandleInPacket(packet Packet) {
 		cb, ok := this.commandQueue[hex.EncodeToString(packet.Header.ResponseTo)]
 
 		if !ok {
-			this.dht.logger.Notice(this, "x Unknown response: ", hex.EncodeToString(packet.Header.ResponseTo), packet)
+			this.dht.logger.Info(this, "x Unknown response: ", hex.EncodeToString(packet.Header.ResponseTo), packet)
 			this.Unlock()
 			return
 		}
@@ -205,7 +205,7 @@ func (this *Node) HandleInPacket(packet Packet) {
 		}
 
 		this.Lock()
-		close(cb.c)
+		// close(cb.c)
 		delete(this.commandQueue, hex.EncodeToString(packet.Header.ResponseTo))
 		this.Unlock()
 	} else {
@@ -569,7 +569,7 @@ func (this *Node) send(packet Packet) chan interface{} {
 
 		res <- errors.New(err)
 
-		close(res)
+		// close(res)
 
 		this.disconnect()
 	}()

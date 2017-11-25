@@ -582,6 +582,6 @@ func (this *Node) disconnect() {
 
 	for _, res := range this.commandQueue {
 		res.timer.Stop()
-		close(res.c)
+		// close(res.c)
 	}
 }

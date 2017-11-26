@@ -92,11 +92,11 @@ func (this *Dht) Cli() {
 
 func help() {
 	fmt.Println("Commands:")
-	fmt.Println("  h            - This help")
-	fmt.Println("  i            - Global info")
-	fmt.Println("  r            - Print routing table")
-	fmt.Println("  s val        - Store. Returns the hash of the stored item")
+	fmt.Println("  s val        - Store. Returns the hash and the number of OK answers")
 	fmt.Println("  f key        - Fetch")
+	// fmt.Println("  i            - Global info")
+	fmt.Println("  r            - Print routing table")
 	fmt.Println("  l            - Print local store")
+	fmt.Println("  h            - This help")
 	fmt.Println("  q            - Quit")
 }

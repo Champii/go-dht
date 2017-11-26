@@ -50,7 +50,6 @@ Type 'h' to get help
 $> h
 Commands:
   h            - This help
-  i            - Global info
   r            - Print routing table
   s val        - Store. Returns the hash and the number of OK answers
   f key        - Fetch

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/hex"
+	"fmt"
+	"io/ioutil"
 	"os"
 	"os/signal"
 	"strconv"
@@ -9,20 +12,119 @@ import (
 	"time"
 
 	"github.com/champii/go-dht/dht"
+	"github.com/urfave/cli"
 )
 
 func main() {
-	parseArgs(func(options dht.DhtOptions) {
+	parseArgs(func(options dht.DhtOptions, c *cli.Context) {
 		if options.Cluster > 0 {
 			cluster(options)
 		} else {
 			node := startOne(options)
 
-			node.Wait()
+			if c.Bool("s") {
+				storeFromStdin(node)
+			} else if len(c.String("S")) > 0 {
+				storeAt(node, c.String("S"))
+			} else if len(c.String("f")) > 0 {
+				fetchFromHash(node, c.String("f"))
+			} else if len(c.String("F")) > 0 {
+				fetchAt(node, c.String("F"))
+			} else {
+				node.Wait()
+			}
 
 			listenExitSignals(node)
 		}
 	})
+}
+
+func storeFromStdin(node *dht.Dht) {
+	res, err := ioutil.ReadAll(os.Stdin)
+
+	if err != nil {
+		node.Logger().Critical("Cannot store", err)
+
+		return
+	}
+
+	hash, nb, err := node.Store(res)
+
+	if err != nil {
+		node.Logger().Critical("Cannot store", err)
+
+		return
+	}
+
+	if nb == 0 {
+		node.Logger().Critical("Cannot store, no nodes found")
+
+		return
+	}
+
+	fmt.Println(hex.EncodeToString(hash))
+}
+
+func storeAt(node *dht.Dht, hashStr string) {
+	res, err := ioutil.ReadAll(os.Stdin)
+
+	if err != nil {
+		node.Logger().Critical("Cannot store", err)
+
+		return
+	}
+
+	hash := dht.NewHash([]byte(hashStr))
+
+	hash, nb, err := node.StoreAt(hash, res)
+
+	if err != nil {
+		node.Logger().Critical("Cannot store", err)
+
+		return
+	}
+
+	if nb == 0 {
+		node.Logger().Critical("Cannot store, no nodes found")
+
+		return
+	}
+
+	fmt.Println(hex.EncodeToString(hash))
+}
+
+func fetchFromHash(node *dht.Dht, hashStr string) {
+	hash, err := hex.DecodeString(hashStr)
+
+	if err != nil {
+		node.Logger().Critical("Cannot fetch", err)
+
+		return
+	}
+
+	res, err := node.Fetch(hash)
+
+	if err != nil {
+		node.Logger().Critical("Cannot fetch", err)
+
+		return
+	}
+
+	fmt.Print(string(res.([]byte)))
+}
+
+func fetchAt(node *dht.Dht, hashStr string) {
+	hash := dht.NewHash([]byte(hashStr))
+
+	res, err := node.Fetch(hash)
+
+	if err != nil {
+		node.Logger().Critical("Cannot fetch", err)
+
+		return
+	}
+
+	fmt.Print(string(res.([]byte)))
 }
 
 func listenExitSignals(client *dht.Dht) {

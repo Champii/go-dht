@@ -43,7 +43,7 @@ COPYRIGHT:
 	app := cli.NewApp()
 
 	app.Name = "DHT"
-	app.Version = "0.1.1"
+	app.Version = "0.2.0"
 	app.Compiled = time.Now()
 
 	app.Usage = "Experimental Distributed Hash Table"
@@ -59,12 +59,24 @@ COPYRIGHT:
 			Value: ":3000",
 		},
 		cli.BoolFlag{
-			Name:  "i",
+			Name:  "i, interactif",
 			Usage: "Interactif",
 		},
 		cli.BoolFlag{
-			Name:  "s",
-			Usage: "Stat mode",
+			Name:  "s, store",
+			Usage: "Store from Stdin",
+		},
+		cli.StringFlag{
+			Name:  "S, store-at",
+			Usage: "Same as '-s' but store at given `key`",
+		},
+		cli.StringFlag{
+			Name:  "f, fetch",
+			Usage: "Fetch `hash` and prints to Stdout",
+		},
+		cli.StringFlag{
+			Name:  "F, fetch-at",
+			Usage: "Same as '-f' but fetch from given `key`",
 		},
 		cli.IntFlag{
 			Name:  "n, network",
@@ -83,7 +95,7 @@ COPYRIGHT:
 	return app
 }
 
-func parseArgs(done func(dht.DhtOptions)) {
+func parseArgs(done func(dht.DhtOptions, *cli.Context)) {
 	app := prepareArgs()
 
 	app.Action = func(c *cli.Context) error {
@@ -106,7 +118,7 @@ func parseArgs(done func(dht.DhtOptions)) {
 			options.Stats = false
 		}
 
-		done(options)
+		done(options, c)
 
 		return nil
 	}

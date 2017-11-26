@@ -80,7 +80,7 @@ func main() {
 		BootstrapAddr: "0.0.0.0:3000",
 	})
 
-  // no error management for lisibility but you realy should.
+	// no error management for lisibility but you realy should.
 
 	client.Start()
 	

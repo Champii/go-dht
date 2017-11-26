@@ -34,10 +34,10 @@ OPTIONS:
 
 ```bash
 $> go build && ./go-dht -n 3 -v 4
-19:45:57.136 ▶ INFO 001 Listening on 0.0.0.0:3000
-19:45:58.136 ▶ INFO 002 Listening on 0.0.0.0:3001
+19:45:57.136 ▶ INFO 001 Listening on :3000
+19:45:58.136 ▶ INFO 002 Listening on :3001
 19:45:58.137 ▶ INFO 003 Ready...
-19:45:58.236 ▶ INFO 004 Listening on 0.0.0.0:3002
+19:45:58.236 ▶ INFO 004 Listening on :3002
 19:45:58.240 ▶ INFO 005 Ready...
 
 ```
@@ -45,22 +45,20 @@ $> go build && ./go-dht -n 3 -v 4
 ### Interactive console to connect to the network
 
 ```
-$> go build && ./go-dht -c 0.0.0.0:3000 -l 0.0.0.0:6000 -i
-19:43:06.711 ▶ INFO 001 Listening on 0.0.0.0:6000
-19:43:06.720 ▶ INFO 002 Ready...
+$> go build && ./go-dht -c :3000 -l :6000 -i
 Type 'h' to get help
 $> h
 Commands:
   h            - This help
   i            - Global info
   r            - Print routing table
-  s val        - Store. Returns the hash of the stored item
+  s val        - Store. Returns the hash and the number of OK answers
   f key        - Fetch
   l            - Print local store
   q            - Quit
 $> s testValue
-92ba3721b20d13873730ce026db89920b47379dc39797ce74b925a3017c2048f
-$> f 92ba3721b20d13873730ce026db89920b47379dc39797ce74b925a3017c2048f
+92ba3721b20d13873730ce026db89920 16
+$> f 92ba3721b20d13873730ce026db89920
 testValue
 $>
 ```
@@ -82,21 +80,13 @@ func main() {
 		BootstrapAddr: "0.0.0.0:3000",
 	})
 
-	if err := client.Start(); err != nil {
-		return
-	}
+  // no error management for lisibility but you realy should.
 
-	hash, stored, err := client.Store("Some value")
+	client.Start()
+	
+	hash, _, _ := client.Store("Some value")
 
-	if err != nil || stored == 0 {
-		return
-	}
-
-	value, err := client.Fetch(hash)
-
-	if err != nil {
-		return
-	}
+	value, _ := client.Fetch(hash)
 
 	fmt.Println(value) // Prints 'Some value'
 }
@@ -127,7 +117,6 @@ func (*Dht) StoredKeys() int
 
 ## Todo
 
-- Refuse connection from nodes when the hash exists already in routing
 - Storage spread when high demand (with timeout decay with distance over best storage)
 - Give some keys to newly connected
 - keep old nodes in bucket (keep it sorted tho) + spare list for excedent
@@ -137,5 +126,4 @@ func (*Dht) StoredKeys() int
 - Mirror Node (keeps all keys he finds)
 - Proxy Node (for NAT Traversal)
 - Debug Node that gets all infos from every nodes (Add a debug mode to do so)
-- UDP instead of TCP ?
 - key expire timeout ?

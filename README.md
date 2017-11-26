@@ -87,7 +87,7 @@ func main() {
 
 	value, _ := client.Fetch(hash)
 
-  fmt.Println(value) // Prints 'Some value'
+	fmt.Println(value) // Prints 'Some value'
   
 	client.Stop()
 }

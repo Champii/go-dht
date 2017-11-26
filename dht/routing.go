@@ -2,20 +2,20 @@ package dht
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
-	"net"
 	"sync"
 )
 
 type Routing struct {
 	sync.RWMutex
-	buckets [][]*Node
+	buckets [][]PacketContact
 	dht     *Dht
 }
 
 func NewRouting() *Routing {
-	buckets := make([][]*Node, HASH_SIZE)
+	buckets := make([][]PacketContact, HASH_SIZE)
 
 	return &Routing{
 		buckets: buckets,
@@ -27,13 +27,10 @@ func (this *Routing) Print() {
 	defer this.RUnlock()
 
 	for i, bucket := range this.buckets {
-		for _, node := range bucket {
-			if node != nil {
-				fmt.Println(i, hex.EncodeToString(node.contact.Hash))
-			}
+		for _, contact := range bucket {
+			fmt.Println(i, hex.EncodeToString(contact.Hash))
 		}
 	}
-
 }
 
 func (this *Routing) Size() int {
@@ -105,29 +102,32 @@ func (this *Routing) distanceBetwin(hash1, hash2 []byte) int {
 	return res
 }
 
-func (this *Routing) AddNode(node *Node) {
-	if this.GetNode(node.contact.Hash) != nil || this.GetByAddr(node.addr) != nil {
+func (this *Routing) AddNode(contact PacketContact) {
+	if _, err := this.GetNode(contact.Hash); err == nil {
 		return
 	}
 
-	bucketNb := this.countSameBit(node.contact.Hash)
-
-	if bucketNb >= BUCKET_SIZE {
-		this.dht.logger.Debug(node, "x Bucket full", bucketNb)
-
-		return
+	if c, err := this.GetByAddr(contact.Addr); err == nil {
+		this.RemoveNode(c)
 	}
+
+	bucketNb := this.countSameBit(contact.Hash)
 
 	this.Lock()
-	this.buckets[bucketNb] = append(this.buckets[bucketNb], node)
+	if bucketNb == HASH_SIZE || len(this.buckets[bucketNb]) > BUCKET_SIZE {
+		this.Unlock()
+		return
+	}
+
+	this.buckets[bucketNb] = append(this.buckets[bucketNb], contact)
 	this.Unlock()
 
-	this.dht.logger.Debug(node, "+ Add Routing. Size: ", this.Size())
+	this.dht.logger.Debug(contact, "+ Add Routing. Size: ", this.Size())
 }
 
-func (this *Routing) RemoveNode(node *Node) {
+func (this *Routing) RemoveNode(contact PacketContact) {
 
-	bucketNb := this.countSameBit(node.contact.Hash)
+	bucketNb := this.countSameBit(contact.Hash)
 
 	size := this.Size() - 1
 
@@ -135,7 +135,7 @@ func (this *Routing) RemoveNode(node *Node) {
 	defer this.Unlock()
 
 	for i, n := range this.buckets[bucketNb] {
-		if compare(n.contact.Hash, node.contact.Hash) == 0 {
+		if compare(n.Hash, contact.Hash) == 0 {
 			if i == 0 {
 				this.buckets[bucketNb] = this.buckets[bucketNb][1:]
 			} else if i == len(this.buckets[bucketNb])-1 {
@@ -144,7 +144,7 @@ func (this *Routing) RemoveNode(node *Node) {
 				this.buckets[bucketNb] = append(this.buckets[bucketNb][:i], this.buckets[bucketNb][i+1:]...)
 			}
 
-			this.dht.logger.Debug(node, "- Del Routing. Size: ", size)
+			this.dht.logger.Debug(n, "- Del Routing. Size: ", size)
 
 			if size == 0 && len(this.dht.options.BootstrapAddr) != 0 {
 				this.dht.logger.Critical("Empty routing table. Stoping.")
@@ -156,11 +156,11 @@ func (this *Routing) RemoveNode(node *Node) {
 		}
 	}
 
-	this.dht.logger.Warning(node, "x Cannot find node")
+	// this.dht.logger.Warning(contact, "x Cannot find node")
 }
 
-func (this *Routing) FindNode(hash []byte) []*Node {
-	res := []*Node{}
+func (this *Routing) FindNode(hash []byte) []PacketContact {
+	res := []PacketContact{}
 
 	size := this.Size()
 
@@ -208,34 +208,34 @@ func (this *Routing) FindNode(hash []byte) []*Node {
 	return res
 }
 
-func (this *Routing) GetNode(hash []byte) *Node {
+func (this *Routing) GetNode(hash []byte) (PacketContact, error) {
 	bucketNb := this.countSameBit(hash)
 
 	if bucketNb == HASH_SIZE {
-		return nil
+		return PacketContact{}, errors.New("Cannot add own")
 	}
 
 	this.RLock()
 	defer this.RUnlock()
 
-	for _, node := range this.buckets[bucketNb] {
-		if compare(node.contact.Hash, hash) == 0 {
-			return node
+	for _, contact := range this.buckets[bucketNb] {
+		if compare(contact.Hash, hash) == 0 {
+			return contact, nil
 		}
 	}
 
-	return nil
+	return PacketContact{}, errors.New("Not found")
 }
 
-func (this *Routing) IsBestStorage(hash []byte) (bool, []*Node) {
+func (this *Routing) IsBestStorage(hash []byte) (bool, []PacketContact) {
 	bucket := this.FindNode(hash)
 
 	dist1 := this.countSameBit(hash)
 
 	smalest := dist1
 
-	for _, node := range bucket {
-		dist2 := this.countSameBit(node.contact.Hash)
+	for _, contact := range bucket {
+		dist2 := this.countSameBit(contact.Hash)
 
 		if dist2 < smalest {
 			smalest = dist2
@@ -246,11 +246,14 @@ func (this *Routing) IsBestStorage(hash []byte) (bool, []*Node) {
 		return false, bucket
 	}
 
-	return true, []*Node{}
+	return true, []PacketContact{}
 }
 
-func (this *Routing) GetAllNodes() []*Node {
-	res := []*Node{}
+func (this *Routing) GetAllNodes() []PacketContact {
+	res := []PacketContact{}
+
+	this.RLock()
+	defer this.RUnlock()
 
 	for i := 0; i < BUCKET_SIZE; i++ {
 		for _, node := range this.buckets[i] {
@@ -261,14 +264,17 @@ func (this *Routing) GetAllNodes() []*Node {
 	return res
 }
 
-func (this *Routing) GetByAddr(addr net.Addr) *Node {
+func (this *Routing) GetByAddr(addr string) (PacketContact, error) {
+	this.RLock()
+	defer this.RUnlock()
+
 	for i := 0; i < BUCKET_SIZE; i++ {
 		for _, node := range this.buckets[i] {
-			if node.addr.String() == addr.String() {
-				return node
+			if addr == node.Addr {
+				return node, nil
 			}
 		}
 	}
 
-	return nil
+	return PacketContact{}, errors.New("Not found")
 }

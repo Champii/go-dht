@@ -2,16 +2,16 @@ package main
 
 import (
 	"fmt"
-	"time"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/champii/go-dht/dht"
 )
 
 func main() {
-	sizes := []int{3, 4, 5, 10, 20, 50, 75}
+	sizes := []int{5, 10, 20, 50, 75}
 
 	for _, size := range sizes {
 		net := cluster(size, dht.DhtOptions{
@@ -22,9 +22,9 @@ func main() {
 			NoRepublishOnExit: true,
 		})
 
-		seed(size * 10, net[0])
+		seed(size*10, net[0])
 
-		checkSeeds(size * 10, net)
+		checkSeeds(size*10, net)
 
 		stopNetwork(net)
 		time.Sleep(time.Millisecond * 200)
@@ -66,7 +66,6 @@ func checkSeeds(nb int, network []*dht.Dht) {
 
 	fmt.Println("Average keys by node:", avgStorage/len(network))
 }
-
 
 func cluster(count int, options dht.DhtOptions) []*dht.Dht {
 	fmt.Print("Start cluster of size ", count, ": ")

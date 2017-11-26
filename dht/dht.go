@@ -21,6 +21,7 @@ type Dht struct {
 	hash         []byte
 	running      bool
 	store        map[string]interface{}
+	commandQueue map[string]CallbackChan
 	logger       *logging.Logger
 	server       net.PacketConn
 	gotBroadcast [][]byte
@@ -41,11 +42,12 @@ type DhtOptions struct {
 
 func New(options DhtOptions) *Dht {
 	res := &Dht{
-		routing: NewRouting(),
-		options: options,
-		running: false,
-		store:   make(map[string]interface{}),
-		logger:  logging.MustGetLogger("dht"),
+		routing:      NewRouting(),
+		options:      options,
+		running:      false,
+		store:        make(map[string]interface{}),
+		commandQueue: make(map[string]CallbackChan),
+		logger:       logging.MustGetLogger("dht"),
 	}
 
 	gob.Register([]PacketContact{})
@@ -199,23 +201,26 @@ func (this *Dht) bootstrap() error {
 
 	bootstrapNode := NewNode(this, addr, []byte{})
 
-	this.routing.AddNode(bootstrapNode)
-	<-bootstrapNode.Ping()
+	// this.routing.AddNode(bootstrapNode)
+
+	err, ok := (<-bootstrapNode.Ping()).(error)
+
+	if ok {
+		return err
+	}
 
 	_ = this.fetchNodes(this.hash)
 
-	go func() {
-		for i, bucket := range this.routing.buckets {
-			if len(bucket) != 0 {
-				continue
-			}
-
-			h := NewRandomHash()
-			h = this.routing.nCopy(h, this.hash, i)
-
-			_ = this.fetchNodes(h)
+	for i, bucket := range this.routing.buckets {
+		if len(bucket) != 0 {
+			continue
 		}
-	}()
+
+		h := NewRandomHash()
+		h = this.routing.nCopy(h, this.hash, i)
+
+		_ = this.fetchNodes(h)
+	}
 
 	this.logger.Info("Ready...")
 
@@ -256,6 +261,7 @@ func (this *Dht) Start() error {
 
 	if len(this.options.BootstrapAddr) > 0 {
 		if err := this.bootstrap(); err != nil {
+			this.Stop()
 			return errors.New("Bootstrap: " + err.Error())
 		}
 	} else {
@@ -273,9 +279,9 @@ func (this *Dht) loop() error {
 	defer this.server.Close()
 
 	for this.running {
-		var packet [10000]byte
+		var packet [4096]byte
 
-		_, addr, err := this.server.ReadFrom(packet[0:])
+		n, addr, err := this.server.ReadFrom(packet[0:])
 
 		if err != nil {
 			if this.running == false {
@@ -285,7 +291,7 @@ func (this *Dht) loop() error {
 			return errors.New("Error reading:" + err.Error())
 		}
 
-		this.handleInPacket(addr, packet[0:])
+		go this.handleInPacket(addr, packet[0:n])
 	}
 
 	return nil
@@ -323,23 +329,11 @@ func (this *Dht) handleInPacket(addr net.Addr, blob_ []byte) {
 	}
 
 	var node *Node
-	if len(packet.Header.Sender.Hash) > 0 {
-		node = this.routing.GetNode(packet.Header.Sender.Hash)
-	}
+	addr, err = net.ResolveUDPAddr("udp", packet.Header.Sender.Addr)
 
-	if node == nil {
-		addr, err := net.ResolveUDPAddr("udp", packet.Header.Sender.Addr)
+	node = NewNodeContact(this, addr, packet.Header.Sender)
 
-		if err == nil {
-			node = this.routing.GetByAddr(addr)
-		}
-	}
-
-	if node == nil {
-		node = NewNode(this, addr, packet.Header.Sender.Hash)
-
-		this.routing.AddNode(node)
-	}
+	this.routing.AddNode(packet.Header.Sender)
 
 	node.HandleInPacket(packet)
 }
@@ -351,7 +345,10 @@ func (this *Dht) Logger() *logging.Logger {
 func (this *Dht) CustomCmd(data interface{}) {
 	bucket := this.routing.FindNode(this.hash)
 
-	for _, node := range bucket {
+	for _, contact := range bucket {
+		addr, _ := net.ResolveUDPAddr("udp", contact.Addr)
+
+		node := NewNodeContact(this, addr, contact)
 		<-node.Custom(data)
 	}
 }
@@ -388,12 +385,13 @@ func (this *Dht) Broadcast(data interface{}) {
 	case Packet:
 		packet = data.(Packet)
 	default:
-		if len(bucket) > 0 {
-			packet = bucket[0].newPacket(COMMAND_BROADCAST, []byte{}, data)
-		}
+		packet = NewPacket(this, COMMAND_BROADCAST, []byte{}, data)
 	}
 
-	for _, node := range bucket {
+	for _, contact := range bucket {
+		addr, _ := net.ResolveUDPAddr("udp", contact.Addr)
+
+		node := NewNodeContact(this, addr, contact)
 		node.Broadcast(packet)
 	}
 }

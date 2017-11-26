@@ -1,12 +1,14 @@
 package dht
 
 import "sort"
-import "fmt"
+
 import "net"
+import "sync"
 
 type QueryJob func(*Node) chan interface{}
 
 type Query struct {
+	sync.RWMutex
 	best        []*Node
 	blacklist   []*Node
 	hash        []byte
@@ -19,6 +21,7 @@ type Query struct {
 
 func NewQuery(hash []byte, job QueryJob, dht *Dht) *Query {
 	return &Query{
+		best:        []*Node{},
 		job:         job,
 		dht:         dht,
 		hash:        hash,
@@ -35,29 +38,37 @@ func (this *Query) Run() interface{} {
 		return []*Node{}
 	}
 
-	this.best = bucket
-	this.sortByClosest(this.best)
-
-	this.blacklist = bucket
-
-	for _, node := range bucket {
-		this.updateClosest(node)
-		this.addToQueue(node)
-	}
-
 	this.workerQueue.Start()
+
+	for _, contact := range bucket {
+		addr, _ := net.ResolveUDPAddr("udp", contact.Addr)
+
+		n := NewNodeContact(this.dht, addr, contact)
+		this.Lock()
+		this.best = append(this.best, n)
+		this.blacklist = append(this.blacklist, n)
+		this.Unlock()
+
+		this.updateClosest(contact)
+		this.addToQueue(n)
+	}
 
 	return this.WaitResult()
 }
 
-func (this *Query) updateClosest(node *Node) {
-	if this.isCloser(node) {
-		this.closest = node.contact.Hash
+func (this *Query) updateClosest(contact PacketContact) {
+	if this.isCloser(contact) {
+		this.Lock()
+		this.closest = contact.Hash
+		this.Unlock()
 	}
 }
 
-func (this *Query) isCloser(node *Node) bool {
-	return this.dht.routing.distanceBetwin(node.contact.Hash, this.hash) < this.dht.routing.distanceBetwin(this.closest, this.hash)
+func (this *Query) isCloser(contact PacketContact) bool {
+	this.RLock()
+	defer this.RUnlock()
+
+	return this.dht.routing.distanceBetwin(contact.Hash, this.hash) < this.dht.routing.distanceBetwin(this.closest, this.hash)
 }
 
 func (this *Query) addToQueue(node *Node) {
@@ -72,13 +83,14 @@ func (this *Query) WaitResult() interface{} {
 	for res := range this.workerQueue.Results {
 		switch res.(type) {
 		case error:
-			fmt.Println(res)
+			// fmt.Println(res)
+			this.workerQueue.OnDone()
 			continue
 		case Packet:
 			if res.(Packet).Header.Command == COMMAND_FOUND {
+				// this.workerQueue.Stop()
 				return res.(Packet).Data
 			}
-
 			switch res.(Packet).Data.(type) {
 			case bool:
 				storeAnswers = append(storeAnswers, res.(Packet).Data.(bool))
@@ -86,11 +98,13 @@ func (this *Query) WaitResult() interface{} {
 				toAdd := res.(Packet).Data.([]PacketContact)
 
 				for _, contact := range toAdd {
-					this.processContact(contact)
+					go this.processContact(contact)
 				}
+			default:
 			}
 		default:
 		}
+		this.workerQueue.OnDone()
 	}
 
 	if len(storeAnswers) > 0 {
@@ -105,7 +119,7 @@ func (this *Query) processContact(contact PacketContact) {
 		return
 	}
 
-	if this.dht.routing.GetNode(contact.Hash) != nil {
+	if _, err := this.dht.routing.GetNode(contact.Hash); err == nil {
 		return
 	}
 
@@ -117,20 +131,30 @@ func (this *Query) processContact(contact PacketContact) {
 
 	n := NewNode(this.dht, addr, contact.Hash)
 
-	this.dht.routing.AddNode(n)
-
+	this.Lock()
 	this.blacklist = append(this.blacklist, n)
+	this.Unlock()
+
+	// _, ok := (<-n.Ping()).(error)
+
+	// if ok {
+	// 	return
+	// }
 
 	this.tryAddToBest(n)
 
-	if this.isCloser(n) {
-		this.addToQueue(n)
-	}
+	// if this.isCloser(n.contact) {
+	// }
 }
 
 func (this *Query) tryAddToBest(node *Node) {
-	if this.isCloser(node) {
-		this.updateClosest(node)
+	this.addToQueue(node)
+
+	if this.isCloser(node.contact) {
+
+		this.updateClosest(node.contact)
+
+		this.Lock()
 
 		this.best = append(this.best, node)
 		this.sortByClosest(this.best)
@@ -142,6 +166,7 @@ func (this *Query) tryAddToBest(node *Node) {
 		}
 
 		this.best = this.best[:smalest]
+		this.Unlock()
 	}
 }
 
@@ -156,6 +181,9 @@ func (this *Query) isOwn(contact PacketContact) bool {
 }
 
 func (this *Query) isContactBlacklisted(contact PacketContact) bool {
+	this.RLock()
+	defer this.RUnlock()
+
 	return this.contains(this.blacklist, contact)
 }
 

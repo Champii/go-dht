@@ -3,7 +3,7 @@ DHT implementation in GO
 
 ## Intro
 
-Basic DHT implementation in GO, based on the Kademilia specifications.
+Basic DHT implementation in GO, based on the Kademlia specifications.
 
 ## Usage
 

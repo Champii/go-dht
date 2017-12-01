@@ -42,6 +42,8 @@ bash> cat somefile | ./go-dht -c :3000 -l :6000 -s
 bash> ./go-dht -c :3000 -l :6000 -f 92ba3721b20d13873730ce026db89920 > somefile
 ```
 
+Default storage size: 500Mo. Max item size in storage: 5Mo
+
 ### But you can also name them
 ```
 bash> cat somefile | ./go-dht -c :3000 -l :6000 -S filename
@@ -92,7 +94,8 @@ func main() {
 	
 	hash, _, _ := client.Store("Some value")
 
-	value, _ := client.Fetch(hash)
+  var value string
+	client.Fetch(hash, &value)
 
 	fmt.Println(value) // Prints 'Some value'
   
@@ -151,7 +154,6 @@ func (*Dht) StoredKeys() int
 
 ## Limits
 
-- Currently, the packet size is limited to 8KB, and so do size of the stored items.
 - The lib provides a `StoreAt()` API that must be used wisely. In fact, by allowing to 
 store any content at a given key instead of hashing it breaks the
 automatic repartition of the data accross the network, as one can choose to store some
@@ -164,7 +166,8 @@ in coordination with `OnStore` callback, which can decide if the content is to b
 
 ## Todo
 
-- Remove 8k hard limit on packet size to allow big file transfers (header with packet size ?)
+- Announce store before actually send to avoid sending data a node can't store
+- Store on disk 
 - Storage spread when high demand (with timeout decay with distance over best storage)
 - Give some keys to newly connected
 - keep old nodes in bucket (keep it sorted tho) + spare list for excedent
@@ -175,3 +178,5 @@ in coordination with `OnStore` callback, which can decide if the content is to b
 - Proxy Node (for NAT Traversal)
 - Debug Node that gets all infos from every nodes (Add a debug mode to do so)
 - key expire timeout ?
+- Detect and prevent Byzantine attack failure
+- Manual or reproducible serialization (avoid native `gob` feature)

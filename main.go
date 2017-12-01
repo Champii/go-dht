@@ -76,7 +76,7 @@ func storeAt(node *dht.Dht, hashStr string) {
 
 	hash := dht.NewHash([]byte(hashStr))
 
-	hash, nb, err := node.StoreAt(hash, res)
+	_, nb, err := node.StoreAt(hash, res)
 
 	if err != nil {
 		node.Logger().Critical("Cannot store", err)
@@ -102,7 +102,10 @@ func fetchFromHash(node *dht.Dht, hashStr string) {
 		return
 	}
 
-	res, err := node.Fetch(hash)
+	time.Sleep(time.Second)
+
+	var b []byte
+	err = node.Fetch(hash, &b)
 
 	if err != nil {
 		node.Logger().Critical("Cannot fetch", err)
@@ -110,13 +113,16 @@ func fetchFromHash(node *dht.Dht, hashStr string) {
 		return
 	}
 
-	fmt.Print(string(res.([]byte)))
+	fmt.Print(string(b))
 }
 
 func fetchAt(node *dht.Dht, hashStr string) {
 	hash := dht.NewHash([]byte(hashStr))
 
-	res, err := node.Fetch(hash)
+	time.Sleep(time.Second)
+
+	var b []byte
+	err := node.Fetch(hash, &b)
 
 	if err != nil {
 		node.Logger().Critical("Cannot fetch", err)
@@ -124,7 +130,7 @@ func fetchAt(node *dht.Dht, hashStr string) {
 		return
 	}
 
-	fmt.Print(string(res.([]byte)))
+	fmt.Print(string(b))
 }
 
 func listenExitSignals(client *dht.Dht) {

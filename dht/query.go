@@ -26,7 +26,7 @@ func NewQuery(hash []byte, job QueryJob, dht *Dht) *Query {
 		dht:         dht,
 		hash:        hash,
 		closest:     dht.hash,
-		workerQueue: NewWorkerQueue(3, 100),
+		workerQueue: NewWorkerQueue(7, 100),
 		result:      make(chan interface{}, 1),
 	}
 }
@@ -83,27 +83,35 @@ func (this *Query) WaitResult() interface{} {
 	for res := range this.workerQueue.Results {
 		switch res.(type) {
 		case error:
-			// fmt.Println(res)
 			this.workerQueue.OnDone()
 			continue
 		case Packet:
-			if res.(Packet).Header.Command == COMMAND_FOUND {
-				// this.workerQueue.Stop()
-				return res.(Packet).Data
-			}
-			switch res.(Packet).Data.(type) {
-			case bool:
-				storeAnswers = append(storeAnswers, res.(Packet).Data.(bool))
-			case []PacketContact:
-				toAdd := res.(Packet).Data.([]PacketContact)
+			packet := res.(Packet)
+
+			switch packet.Header.Command {
+			case COMMAND_FOUND:
+				return packet
+
+			case COMMAND_STORED:
+				b := false
+				packet.GetData(&b)
+
+				storeAnswers = append(storeAnswers, b)
+			case COMMAND_FOUND_NODES:
+				b := []PacketContact{}
+				packet.GetData(&b)
+
+				toAdd := b
 
 				for _, contact := range toAdd {
-					go this.processContact(contact)
+					this.processContact(contact)
 				}
+
 			default:
 			}
 		default:
 		}
+
 		this.workerQueue.OnDone()
 	}
 

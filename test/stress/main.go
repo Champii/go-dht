@@ -54,7 +54,8 @@ func checkSeeds(nb int, network []*dht.Dht) {
 	for nodeNb, node := range network {
 		avgStorage += node.StoredKeys()
 		for i := 0; i < nb; i++ {
-			res, err := node.Fetch(dht.NewHash([]byte(strconv.Itoa(i))))
+			var res int
+			err := node.Fetch(dht.NewHash([]byte(strconv.Itoa(i))), &res)
 
 			if err != nil || res != i {
 				fmt.Println(nodeNb, "Error getting value", i, "on", nb, ":", res, err)

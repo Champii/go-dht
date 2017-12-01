@@ -3,6 +3,7 @@ package dht
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 )
 
 const (
@@ -10,7 +11,17 @@ const (
 	BUCKET_SIZE = HASH_SIZE / 8
 )
 
-func NewHash(val []byte) []byte {
+type Hash []byte
+
+func (this Hash) Redacted() interface{} {
+	if len(this) == 0 {
+		return this
+	}
+
+	return hex.EncodeToString(this)[:16]
+}
+
+func NewHash(val []byte) Hash {
 	h := sha256.New()
 
 	h.Write(val)
@@ -18,7 +29,7 @@ func NewHash(val []byte) []byte {
 	return h.Sum(nil)[:BUCKET_SIZE]
 }
 
-func NewRandomHash() []byte {
+func NewRandomHash() Hash {
 	res := make([]byte, BUCKET_SIZE)
 
 	rand.Read(res)

@@ -28,7 +28,7 @@ func (this *Dht) Cli() {
 		fmt.Print("$> ")
 
 		if !scanner.Scan() {
-			fmt.Println("ERROR SCAN")
+			return
 		}
 
 		ln := scanner.Text()
@@ -69,14 +69,15 @@ func (this *Dht) Cli() {
 				continue
 			}
 
-			val, err := this.Fetch(h)
+			var str string
+			err = this.Fetch(h, &str)
 			if err != nil {
 				fmt.Println(err.Error())
 
 				continue
 			}
 
-			fmt.Println(val)
+			fmt.Println(string(str))
 
 		case "l":
 			this.PrintLocalStore()

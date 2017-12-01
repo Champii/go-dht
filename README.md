@@ -139,7 +139,8 @@ func (*Dht) Stop()
 
 func (*Dht) Store(interface{}) ([]byte, int, error)
 func (*Dht) StoreAt([]byte, interface{}) ([]byte, int, error)
-func (*Dht) Fetch([]byte) ([]byte, int, error)
+
+func (*Dht) Fetch([]byte, *interface{}) error
 
 func (*Dht) CustomCmd(interface{})
 func (*Dht) Broadcast(interface{})

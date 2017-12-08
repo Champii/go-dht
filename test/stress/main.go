@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
 	"os"
 	"strconv"
@@ -36,7 +37,10 @@ func seed(nb int, client *dht.Dht) {
 	defer timeTrack(time.Now())
 
 	for i := 0; i < nb; i++ {
-		_, n, err := client.StoreAt(dht.NewHash([]byte(strconv.Itoa(i))), i)
+		bs := make([]byte, 4)
+		binary.LittleEndian.PutUint32(bs, uint32(i))
+
+		_, n, err := client.StoreAt(dht.NewHash([]byte(strconv.Itoa(i))), bs)
 
 		if err != nil || n == 0 {
 			fmt.Println("Error seeding node", i, "on", nb, ":", n, err)
@@ -54,10 +58,11 @@ func checkSeeds(nb int, network []*dht.Dht) {
 	for nodeNb, node := range network {
 		avgStorage += node.StoredKeys()
 		for i := 0; i < nb; i++ {
-			var res int
-			err := node.Fetch(dht.NewHash([]byte(strconv.Itoa(i))), &res)
+			bs, err := node.Fetch(dht.NewHash([]byte(strconv.Itoa(i))))
 
-			if err != nil || res != i {
+			res := binary.LittleEndian.Uint32(bs)
+
+			if err != nil || int(res) != i {
 				fmt.Println(nodeNb, "Error getting value", i, "on", nb, ":", res, err)
 
 				os.Exit(0)

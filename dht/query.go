@@ -89,19 +89,13 @@ func (this *Query) WaitResult() interface{} {
 			packet := res.(Packet)
 
 			switch packet.Header.Command {
-			case COMMAND_FOUND:
-				return packet
+			case Command_FOUND:
+				return packet.GetFound()
 
-			case COMMAND_STORED:
-				b := false
-				packet.GetData(&b)
-
-				storeAnswers = append(storeAnswers, b)
-			case COMMAND_FOUND_NODES:
-				b := []PacketContact{}
-				packet.GetData(&b)
-
-				toAdd := b
+			case Command_STORED:
+				storeAnswers = append(storeAnswers, packet.GetOk())
+			case Command_FOUND_NODES:
+				toAdd := packet.GetFoundNodes().Nodes
 
 				for _, contact := range toAdd {
 					this.processContact(contact)
@@ -122,7 +116,7 @@ func (this *Query) WaitResult() interface{} {
 	return this.best
 }
 
-func (this *Query) processContact(contact PacketContact) {
+func (this *Query) processContact(contact *PacketContact) {
 	if this.isContactBlacklisted(contact) || this.isOwn(contact) {
 		return
 	}
@@ -184,18 +178,18 @@ func (this *Query) sortByClosest(bucket []*Node) {
 	})
 }
 
-func (this *Query) isOwn(contact PacketContact) bool {
+func (this *Query) isOwn(contact *PacketContact) bool {
 	return compare(this.dht.hash, contact.Hash) == 0
 }
 
-func (this *Query) isContactBlacklisted(contact PacketContact) bool {
+func (this *Query) isContactBlacklisted(contact *PacketContact) bool {
 	this.RLock()
 	defer this.RUnlock()
 
 	return this.contains(this.blacklist, contact)
 }
 
-func (this *Query) contains(bucket []*Node, node PacketContact) bool {
+func (this *Query) contains(bucket []*Node, node *PacketContact) bool {
 	for _, n := range bucket {
 		if compare(node.Hash, n.contact.Hash) == 0 {
 			return true
@@ -205,7 +199,7 @@ func (this *Query) contains(bucket []*Node, node PacketContact) bool {
 	return false
 }
 
-func (this *Query) contactContains(bucket []PacketContact, node PacketContact) bool {
+func (this *Query) contactContains(bucket []PacketContact, node *PacketContact) bool {
 	for _, n := range bucket {
 		if compare(node.Hash, n.Hash) == 0 {
 			return true

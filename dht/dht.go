@@ -1,16 +1,15 @@
 package dht
 
 import (
-	"bytes"
-	"encoding/gob"
 	"encoding/hex"
 	"errors"
 	"math/rand"
 	"net"
 	"os"
-	"sort"
 	"sync"
 	"time"
+
+	"github.com/golang/protobuf/proto"
 
 	logging "github.com/op/go-logging"
 )
@@ -27,7 +26,7 @@ type Dht struct {
 	server        net.PacketConn
 	gotBroadcast  [][]byte
 	messageChunks map[string]WaitingPartMsg
-	sentMsgs      map[string][][]byte
+	sentMsgs      map[string][]Packet
 }
 
 type DhtOptions struct {
@@ -50,8 +49,8 @@ type WaitingPartMsg struct {
 	timeout *time.Timer
 	hash    []byte
 	addr    net.Addr
-	total   int
-	parts   []UDPWrapper
+	total   int32
+	parts   [][]byte
 }
 
 func New(options DhtOptions) *Dht {
@@ -70,15 +69,9 @@ func New(options DhtOptions) *Dht {
 		store:         make(map[string][]byte),
 		commandQueue:  make(map[string]CallbackChan),
 		messageChunks: make(map[string]WaitingPartMsg),
-		sentMsgs:      make(map[string][][]byte),
+		sentMsgs:      make(map[string][]Packet),
 		logger:        logging.MustGetLogger("dht"),
 	}
-
-	gob.Register([]PacketContact{})
-	gob.Register(StoreInst{})
-	gob.Register(CustomCmd{})
-	gob.Register(UDPWrapper{})
-	gob.Register(RepeatCmd{})
 
 	initLogger(res)
 
@@ -141,30 +134,12 @@ func (this *Dht) republish() {
 	this.logger.Debug("Republished", len(this.store))
 }
 
-func (this *Dht) Store(value interface{}) ([]byte, int, error) {
-	var buf bytes.Buffer
-	enc := gob.NewEncoder(&buf)
-	err := enc.Encode(value)
-
-	if err != nil {
-		return []byte{}, 0, err
-	}
-
-	hash := NewHash(buf.Bytes())
-
-	return this.StoreAt(hash, value)
+func (this *Dht) Store(value []byte) ([]byte, int, error) {
+	return this.StoreAt(NewHash(value), value)
 }
 
-func (this *Dht) StoreAt(hash []byte, value interface{}) ([]byte, int, error) {
-	var blob bytes.Buffer
-	enc := gob.NewEncoder(&blob)
-	err := enc.Encode(value)
-
-	if err != nil {
-		return []byte{}, 0, errors.New("Store: cannot marshal value")
-	}
-
-	if blob.Len() > this.options.MaxItemSize {
+func (this *Dht) StoreAt(hash []byte, value []byte) ([]byte, int, error) {
+	if len(value) > this.options.MaxItemSize {
 		return []byte{}, 0, errors.New("Store: Exceeds max limit")
 	}
 
@@ -174,9 +149,8 @@ func (this *Dht) StoreAt(hash []byte, value interface{}) ([]byte, int, error) {
 		return []byte{}, 0, errors.New("No nodes found")
 	}
 
-	data := blob.Bytes()
 	fn := func(node *Node) chan interface{} {
-		return node.Store(hash, data)
+		return node.Store(hash, value)
 	}
 
 	query := NewQuery(hash, fn, this)
@@ -201,7 +175,7 @@ func (this *Dht) StoreAt(hash []byte, value interface{}) ([]byte, int, error) {
 	return hash, storedOkNb, nil
 }
 
-func (this *Dht) Fetch(hash []byte, ptr interface{}) error {
+func (this *Dht) Fetch(hash []byte) ([]byte, error) {
 	fn := func(node *Node) chan interface{} {
 		return node.Fetch(hash)
 	}
@@ -212,33 +186,16 @@ func (this *Dht) Fetch(hash []byte, ptr interface{}) error {
 
 	switch res.(type) {
 	case []*Node:
-		return errors.New("Not found")
-	case Packet:
-		packet := res.(Packet)
+		return nil, errors.New("Not found")
+	case *Found:
+		found := res.(*Found)
 
-		// var data []byte
-		return packet.GetData(ptr)
+		return found.Header.Data, nil
 
-		// var blob bytes.Buffer
-		// blob.Write(data)
-
-		// dec := gob.NewDecoder(&blob)
-		// return dec.Decode(ptr)
-
-		// return nil
 	default:
 	}
 
-	// var blob bytes.Buffer
-	// blob.Write(res.([]byte))
-
-	// dec := gob.NewDecoder(&blob)
-
-	// if err := dec.Decode(ptr); err != nil {
-	// 	return err
-	// }
-
-	return errors.New("Unknown fetched data")
+	return nil, errors.New("Unknown fetched data")
 }
 
 func (this *Dht) fetchNodes(hash []byte) []*Node {
@@ -346,7 +303,7 @@ func (this *Dht) loop() error {
 	for this.running {
 		var message [BUFFER_SIZE]byte
 
-		_, addr, err := this.server.ReadFrom(message[0:])
+		n, addr, err := this.server.ReadFrom(message[0:])
 
 		if err != nil {
 			if this.running == false {
@@ -356,7 +313,7 @@ func (this *Dht) loop() error {
 			return errors.New("Error reading:" + err.Error())
 		}
 
-		go this.handleInWrapper(addr, message[0:])
+		go this.handleInPacket(addr, message[:n])
 	}
 
 	return nil
@@ -377,139 +334,28 @@ func (this *Dht) Stop() {
 
 }
 
-func (this *Dht) handleInWrapper(addr net.Addr, blob_ []byte) {
-	var wrapper UDPWrapper
-
-	var blob bytes.Buffer
-	blob.Write(blob_)
-
-	dec := gob.NewDecoder(&blob)
-
-	err := dec.Decode(&wrapper)
-
-	if err != nil {
-		this.logger.Warning("Invalid packet wrapper")
-
-		return
-	}
-
-	this.Lock()
-
-	curMsg, ok := this.messageChunks[string(wrapper.Hash)]
-
-	if !ok {
-		curMsg = WaitingPartMsg{
-			timer:   time.NewTimer(time.Millisecond * 100),
-			timeout: time.NewTimer(time.Second * 30),
-			hash:    wrapper.Hash,
-			total:   wrapper.Total,
-			addr:    addr,
-			parts:   []UDPWrapper{},
-		}
-
-		go func() {
-			<-curMsg.timeout.C
-			curMsg.timeout = nil
-			curMsg.timer.Stop()
-			curMsg.timer = nil
-			this.Lock()
-			delete(this.messageChunks, string(wrapper.Hash))
-			this.Unlock()
-		}()
-
-		var onTimer func()
-		onTimer = func() {
-			if curMsg.timeout == nil {
-				return
-			}
-
-			<-curMsg.timer.C
-
-			this.RLock()
-			if len(this.messageChunks[string(wrapper.Hash)].parts) < this.messageChunks[string(wrapper.Hash)].total {
-				this.RUnlock()
-				this.onMsgTimeout(this.messageChunks[string(wrapper.Hash)])
-			} else {
-				this.RUnlock()
-			}
-
-			curMsg.timer = time.NewTimer(time.Millisecond * 150)
-			go onTimer()
-		}
-
-		go onTimer()
-	}
-
-	curMsg.parts = append(curMsg.parts, wrapper)
-
-	if len(curMsg.parts)*BUFFER_SIZE > this.options.MaxItemSize {
-		curMsg.timeout.Stop()
-		curMsg.timer.Stop()
-		delete(this.messageChunks, string(wrapper.Hash))
-		this.Unlock()
-
-		return
-	}
-
-	this.messageChunks[string(wrapper.Hash)] = curMsg
-	this.Unlock()
-
-	if len(curMsg.parts) == wrapper.Total {
-		curMsg.timer.Stop()
-		sort.Sort(UDPWrapperList(curMsg.parts))
-		res := []byte{}
-		for _, w := range curMsg.parts {
-			res = append(res, w.Data...)
-		}
-
-		this.Lock()
-		delete(this.messageChunks, string(wrapper.Hash))
-		this.Unlock()
-
-		this.handleInPacket(addr, res)
-	}
-}
-
-func (this *Dht) onMsgTimeout(msg WaitingPartMsg) {
-	node := NewNode(this, msg.addr, []byte{})
-
-	missing := []int{}
-	sort.Sort(UDPWrapperList(msg.parts))
-
-	j := 0
-	for i := 0; i < msg.total; i++ {
-		if j >= len(msg.parts) || msg.parts[j].Id != i {
-			missing = append(missing, i)
-		} else {
-			j++
-		}
-	}
-
-	node.RepeatPlease(msg.hash, missing)
-}
-
-func (this *Dht) handleInPacket(addr net.Addr, blob_ []byte) {
+func (this *Dht) handleInPacket(addr net.Addr, blob []byte) {
 	var packet Packet
 
-	var blob bytes.Buffer
-	blob.Write(blob_)
-
-	dec := gob.NewDecoder(&blob)
-
-	err := dec.Decode(&packet)
-
-	if err != nil {
-		this.logger.Warning("Invalid packet")
+	if err := proto.Unmarshal(blob, &packet); err != nil {
+		this.logger.Warning("Invalid packet", err)
 
 		return
 	}
 
 	var node *Node
-	addr, err = net.ResolveUDPAddr("udp", packet.Header.Sender.Addr)
 
-	node = NewNodeContact(this, addr, packet.Header.Sender)
+	addr, err := net.ResolveUDPAddr("udp", packet.Header.Sender.Addr)
 
-	this.routing.AddNode(packet.Header.Sender)
+	if err != nil {
+		this.logger.Warning("Cannot resolve udp address")
+
+		return
+	}
+
+	node = NewNodeContact(this, addr, *packet.Header.Sender)
+
+	this.routing.AddNode(*packet.Header.Sender)
 
 	node.HandleInPacket(packet)
 }
@@ -561,7 +407,8 @@ func (this *Dht) Broadcast(data interface{}) {
 	case Packet:
 		packet = data.(Packet)
 	default:
-		packet = NewPacket(this, COMMAND_BROADCAST, []byte{}, data)
+		// Fixme
+		// packet = NewPacket(this, Command_BROADCAST, []byte{}, data)
 	}
 
 	for _, contact := range bucket {

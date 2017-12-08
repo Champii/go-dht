@@ -1,0 +1,83 @@
+syntax = "proto3";
+package dht;
+
+message PacketContact {
+  bytes Hash = 1;
+  string addr = 2;
+}
+
+enum Command {
+  NOOP = 0;
+	PING = 1;
+	PONG = 2;
+	STORE = 3;
+	STORED = 4;
+	FETCH = 5;
+	FETCH_NODES = 6;
+	FOUND = 7;
+	FOUND_NODES = 8;
+	BROADCAST = 9;
+	CUSTOM = 10;
+	CUSTOM_ANSWER = 11;
+	REPEAT_PLEASE = 12;
+}
+
+message PacketHeader {
+  int64 DateSent = 1;
+  Command Command = 2;
+  PacketContact Sender = 3;
+  bytes MessageHash = 4;
+  bytes ResponseTo = 5;
+}
+
+message Packet {
+  PacketHeader Header = 1;
+  oneof Data {
+    bytes hash = 2;
+    bool ok = 3;
+
+    FoundNodes foundNodes = 6;
+    Found found = 7;
+    Store store = 8;
+    Custom custom = 10;
+    CustomAnswer customAnswer = 11;
+    RepeatPlease repeatPlease = 12;
+    Broadcast broadcast = 13;
+  }
+};
+
+message PartHeader {
+  int32 Id = 1;
+  int32 Total = 2;
+  bytes Hash = 3;
+  bytes Data = 4;
+}
+
+message Found {
+  PartHeader header = 1;
+}
+
+message FoundNodes {
+  repeated PacketContact Nodes = 1;
+}
+
+message Store {
+  PartHeader header = 1;
+}
+
+message Broadcast {
+  bytes Data = 2;
+}
+
+message Custom {
+  bytes Data = 2;
+}
+
+message CustomAnswer {
+  bytes Data = 2;
+}
+
+message RepeatPlease {
+  bytes Hash = 1;
+  repeated int32 Data = 2;
+}

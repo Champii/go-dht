@@ -48,7 +48,7 @@ func (this *Dht) Cli() {
 				continue
 			}
 
-			hash, nb, err := this.Store(splited[1])
+			hash, nb, err := this.Store([]byte(splited[1]))
 			if err != nil {
 				fmt.Println(err.Error())
 
@@ -69,15 +69,15 @@ func (this *Dht) Cli() {
 				continue
 			}
 
-			var str string
-			err = this.Fetch(h, &str)
+			blob, err := this.Fetch(h)
+
 			if err != nil {
 				fmt.Println(err.Error())
 
 				continue
 			}
 
-			fmt.Println(string(str))
+			fmt.Println(string(blob))
 
 		case "l":
 			this.PrintLocalStore()

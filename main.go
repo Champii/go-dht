@@ -104,8 +104,7 @@ func fetchFromHash(node *dht.Dht, hashStr string) {
 
 	time.Sleep(time.Second)
 
-	var b []byte
-	err = node.Fetch(hash, &b)
+	b, err := node.Fetch(hash)
 
 	if err != nil {
 		node.Logger().Critical("Cannot fetch", err)
@@ -121,8 +120,7 @@ func fetchAt(node *dht.Dht, hashStr string) {
 
 	time.Sleep(time.Second)
 
-	var b []byte
-	err := node.Fetch(hash, &b)
+	b, err := node.Fetch(hash)
 
 	if err != nil {
 		node.Logger().Critical("Cannot fetch", err)

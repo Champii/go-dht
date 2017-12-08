@@ -1,30 +1,14 @@
 package dht
 
 import (
-	"bytes"
-	"encoding/gob"
 	"encoding/hex"
 	"errors"
 	"net"
 	"time"
 
-	"github.com/vmihailenco/msgpack"
-)
+	"github.com/golang/protobuf/proto"
 
-const (
-	COMMAND_NOOP = iota
-	COMMAND_PING
-	COMMAND_PONG
-	COMMAND_STORE
-	COMMAND_STORED
-	COMMAND_FETCH
-	COMMAND_FETCH_NODES
-	COMMAND_FOUND
-	COMMAND_FOUND_NODES
-	COMMAND_BROADCAST
-	COMMAND_CUSTOM
-	COMMAND_CUSTOM_ANSWER
-	COMMAND_REPEAT_PLEASE
+	"github.com/vmihailenco/msgpack"
 )
 
 type Callback func(val Packet, err error)
@@ -41,50 +25,50 @@ type Node struct {
 	dht      *Dht
 }
 
-type PacketContact struct {
-	Hash Hash
-	Addr string
-}
+// type PacketContact struct {
+// 	Hash Hash
+// 	Addr string
+// }
 
-type PacketHeader struct {
-	DateSent    int64
-	Command     int
-	Sender      PacketContact
-	ResponseTo  Hash
-	MessageHash Hash
-}
+// type PacketHeader struct {
+// 	DateSent    int64
+// 	Command     int
+// 	Sender      PacketContact
+// 	ResponseTo  Hash
+// 	MessageHash Hash
+// }
 
-type Packet struct {
-	Header PacketHeader
-	Data   []byte
-}
+// type Packet struct {
+// 	Header PacketHeader
+// 	Data   []byte
+// }
 
-func (this *Packet) GetData(ptr interface{}) error {
-	var blob bytes.Buffer
-	blob.Write(this.Data)
+// func (this *Packet) GetData(ptr interface{}) error {
+// 	var blob bytes.Buffer
+// 	blob.Write(this.Data)
 
-	dec := gob.NewDecoder(&blob)
+// 	dec := gob.NewDecoder(&blob)
 
-	if err := dec.Decode(ptr); err != nil {
-		return err
-	}
+// 	if err := dec.Decode(ptr); err != nil {
+// 		return err
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
-func (this *Packet) SetData(data interface{}) error {
-	var blob bytes.Buffer
+// func (this *Packet) SetData(data interface{}) error {
+// 	var blob bytes.Buffer
 
-	enc := gob.NewEncoder(&blob)
+// 	enc := gob.NewEncoder(&blob)
 
-	if err := enc.Encode(data); err != nil {
-		return err
-	}
+// 	if err := enc.Encode(data); err != nil {
+// 		return err
+// 	}
 
-	this.Data = blob.Bytes()
+// 	this.Data = blob.Bytes()
 
-	return nil
-}
+// 	return nil
+// }
 
 type StoreInst struct {
 	Hash Hash
@@ -96,16 +80,16 @@ type CustomCmd struct {
 	Data    []byte
 }
 
-func NewPacketUngob(dht *Dht, command int, responseTo Hash, data []byte) Packet {
+func NewPacket(dht *Dht, command Command, responseTo Hash, data isPacket_Data) Packet {
 	addr, err := net.ResolveUDPAddr("udp", dht.options.ListenAddr)
 
 	packet := Packet{
-		Header: PacketHeader{
+		Header: &PacketHeader{
 			DateSent:    time.Now().UnixNano(),
 			Command:     command,
 			ResponseTo:  responseTo,
 			MessageHash: []byte{},
-			Sender: PacketContact{
+			Sender: &PacketContact{
 				Addr: addr.String(),
 				Hash: dht.hash,
 			},
@@ -120,46 +104,47 @@ func NewPacketUngob(dht *Dht, command int, responseTo Hash, data []byte) Packet 
 	}
 
 	packet.Header.MessageHash = NewHash(tmp)
+	// packet.Data = data
 
 	return packet
 }
 
-func NewPacket(dht *Dht, command int, responseTo Hash, data interface{}) Packet {
-	addr, err := net.ResolveUDPAddr("udp", dht.options.ListenAddr)
+// func NewPacket(dht *Dht, command Command, responseTo Hash, data interface{}) Packet {
+// 	addr, err := net.ResolveUDPAddr("udp", dht.options.ListenAddr)
 
-	packet := Packet{
-		Header: PacketHeader{
-			DateSent:    time.Now().UnixNano(),
-			Command:     command,
-			ResponseTo:  responseTo,
-			MessageHash: []byte{},
-			Sender: PacketContact{
-				Addr: addr.String(),
-				Hash: dht.hash,
-			},
-		},
-	}
+// 	packet := Packet{
+// 		Header: &PacketHeader{
+// 			DateSent:    time.Now().UnixNano(),
+// 			Command:     command,
+// 			ResponseTo:  responseTo,
+// 			MessageHash: []byte{},
+// 			Sender: &PacketContact{
+// 				Addr: addr.String(),
+// 				Hash: dht.hash,
+// 			},
+// 		},
+// 	}
 
-	packet.SetData(data)
+// 	packet.SetData(data)
 
-	tmp, err := msgpack.Marshal(&packet)
+// 	tmp, err := msgpack.Marshal(&packet)
 
-	if err != nil {
-		dht.logger.Warning(err)
-	}
+// 	if err != nil {
+// 		dht.logger.Warning(err)
+// 	}
 
-	packet.Header.MessageHash = NewHash(tmp)
+// 	packet.Header.MessageHash = NewHash(tmp)
 
-	return packet
-}
+// 	return packet
+// }
 
-func (this *Node) newPacket(command int, responseTo []byte, data interface{}) Packet {
+func (this *Node) newPacket(command Command, responseTo []byte, data isPacket_Data) Packet {
 	return NewPacket(this.dht, command, responseTo, data)
 }
 
-func (this *Node) newPacketUngob(command int, responseTo []byte, data []byte) Packet {
-	return NewPacketUngob(this.dht, command, responseTo, data)
-}
+// func (this *Node) newPacketUngob(command Command, responseTo []byte, data []byte) Packet {
+// 	return NewPacketUngob(this.dht, command, responseTo, data)
+// }
 
 func NewNodeContact(dht *Dht, addr net.Addr, contact PacketContact) *Node {
 	return &Node{
@@ -177,6 +162,79 @@ func NewNode(dht *Dht, addr net.Addr, hash []byte) *Node {
 	})
 }
 
+// func (this *Node) createPartMessage(packet Packet, command isPacket_Data, hash Hash, value []byte) ([]Packet, error) {
+// 	this.dht.RLock()
+// 	msg, ok := this.dht.sentMsgs[string(hash)]
+// 	this.dht.RUnlock()
+
+// 	if ok {
+// 		return msg, nil
+// 	}
+
+// 	total := (len(value) / (BUFFER_SIZE - 128)) + 1
+
+// 	res := []Packet{}
+
+// 	i := 0
+// 	for len(value) > 0 {
+// 		smalest := len(value)
+
+// 		if smalest > BUFFER_SIZE-128 {
+// 			smalest = BUFFER_SIZE - 128
+// 		}
+
+// 		toSend := value[:smalest]
+// 		value = value[smalest:]
+
+// 		cmd := command
+
+// 		partHeader := PartHeader{
+// 			Id:    int32(i),
+// 			Total: int32(total),
+// 			Hash:  packet.Header.MessageHash,
+// 			Data:  toSend,
+// 		}
+
+// 		i++
+// 		packet.Data = cmd
+// 		res = append(res, packet)
+// 	}
+
+// 	this.dht.Lock()
+// 	this.dht.sentMsgs[string(hash)] = res
+// 	this.dht.Unlock()
+
+// 	return res, nil
+// }
+
+// func (this *Node) newPacketPart(command Command, responseTo Hash, command isPacket_Data) {
+// 	addr, err := net.ResolveUDPAddr("udp", dht.options.ListenAddr)
+
+// 	packet := Packet{
+// 		Header: &PacketHeader{
+// 			DateSent:    time.Now().UnixNano(),
+// 			Command:     command,
+// 			ResponseTo:  responseTo,
+// 			MessageHash: []byte{},
+// 			Sender: PacketContact{
+// 				Addr: addr.String(),
+// 				Hash: dht.hash,
+// 			},
+// 		},
+// 		Command: this.createCommand(),
+// 	}
+
+// 	tmp, err := msgpack.Marshal(&packet)
+
+// 	if err != nil {
+// 		dht.logger.Warning(err)
+// 	}
+
+// 	packet.Header.MessageHash = NewHash(tmp)
+
+// 	return packet
+// }
+
 func (this *Node) Redacted() interface{} {
 	if len(this.contact.Hash) == 0 {
 		return this.contact.Addr
@@ -185,64 +243,72 @@ func (this *Node) Redacted() interface{} {
 	return hex.EncodeToString(this.contact.Hash)[:16]
 }
 
+func (this *Node) handleResponseTo(packet Packet) {
+	this.dht.Lock()
+	cb, ok := this.dht.commandQueue[hex.EncodeToString(packet.Header.ResponseTo)]
+
+	if !ok {
+		this.dht.logger.Info(this, "x Unknown response: ", hex.EncodeToString(packet.Header.ResponseTo), packet)
+		this.dht.Unlock()
+		return
+	}
+
+	cb.timer.Stop()
+	this.dht.Unlock()
+
+	switch packet.Header.Command {
+	case Command_NOOP:
+		this.dht.logger.Debug(this, "> NOOP")
+		cb.c <- packet
+	case Command_PONG:
+		this.OnPong(packet, cb)
+	case Command_FOUND:
+		this.OnFound(packet, cb)
+	case Command_FOUND_NODES:
+		this.OnFoundNodes(packet, cb)
+	case Command_STORED:
+		this.OnStored(packet, cb)
+	case Command_CUSTOM_ANSWER:
+		this.OnCustomAnswer(packet, cb)
+	default:
+		this.dht.logger.Error(this, "x answer: UNKNOWN COMMAND", packet.Header.Command)
+		return
+	}
+
+	this.dht.Lock()
+	// close(cb.c)
+	delete(this.dht.commandQueue, hex.EncodeToString(packet.Header.ResponseTo))
+	this.dht.Unlock()
+}
+
+func (this *Node) handleRequest(packet Packet) {
+	switch packet.Header.Command {
+	case Command_NOOP:
+	case Command_PING:
+		this.OnPing(packet)
+	case Command_FETCH:
+		this.OnFetch(packet)
+	case Command_FETCH_NODES:
+		this.OnFetchNodes(packet)
+	case Command_BROADCAST:
+		this.OnBroadcast(packet)
+	case Command_STORE:
+		this.OnStore(packet)
+	case Command_CUSTOM:
+		this.OnCustom(packet)
+	case Command_REPEAT_PLEASE:
+		this.OnRepeatPlease(packet)
+	default:
+		this.dht.logger.Error(this, "x query: UNKNOWN COMMAND", packet.Header.Command)
+		return
+	}
+}
+
 func (this *Node) HandleInPacket(packet Packet) {
 	if len(packet.Header.ResponseTo) > 0 {
-		this.dht.Lock()
-		cb, ok := this.dht.commandQueue[hex.EncodeToString(packet.Header.ResponseTo)]
-
-		if !ok {
-			this.dht.logger.Info(this, "x Unknown response: ", hex.EncodeToString(packet.Header.ResponseTo), packet)
-			this.dht.Unlock()
-			return
-		}
-
-		cb.timer.Stop()
-		this.dht.Unlock()
-
-		switch packet.Header.Command {
-		case COMMAND_NOOP:
-			this.dht.logger.Debug(this, "> NOOP")
-			cb.c <- packet
-		case COMMAND_PONG:
-			this.OnPong(packet, cb)
-		case COMMAND_FOUND:
-			this.OnFound(packet, cb)
-		case COMMAND_FOUND_NODES:
-			this.OnFoundNodes(packet, cb)
-		case COMMAND_STORED:
-			this.OnStored(packet, cb)
-		case COMMAND_CUSTOM_ANSWER:
-			this.OnCustomAnswer(packet, cb)
-		default:
-			this.dht.logger.Error(this, "x answer: UNKNOWN COMMAND", packet.Header.Command)
-			return
-		}
-
-		this.dht.Lock()
-		close(cb.c)
-		delete(this.dht.commandQueue, hex.EncodeToString(packet.Header.ResponseTo))
-		this.dht.Unlock()
+		this.handleResponseTo(packet)
 	} else {
-		switch packet.Header.Command {
-		case COMMAND_NOOP:
-		case COMMAND_PING:
-			this.OnPing(packet)
-		case COMMAND_FETCH:
-			this.OnFetch(packet)
-		case COMMAND_FETCH_NODES:
-			this.OnFetchNodes(packet)
-		case COMMAND_BROADCAST:
-			this.OnBroadcast(packet)
-		case COMMAND_STORE:
-			this.OnStore(packet)
-		case COMMAND_CUSTOM:
-			this.OnCustom(packet)
-		case COMMAND_REPEAT_PLEASE:
-			this.OnRepeatPlease(packet)
-		default:
-			this.dht.logger.Error(this, "x query: UNKNOWN COMMAND", packet.Header.Command)
-			return
-		}
+		this.handleRequest(packet)
 	}
 
 }
@@ -250,7 +316,7 @@ func (this *Node) HandleInPacket(packet Packet) {
 func (this *Node) Ping() chan interface{} {
 	this.dht.logger.Debug(this, "< PING")
 
-	return this.send(this.newPacket(COMMAND_PING, []byte{}, []byte{}))
+	return this.send([]Packet{this.newPacket(Command_PING, []byte{}, nil)})
 }
 
 func (this *Node) OnPing(packet Packet) {
@@ -262,9 +328,7 @@ func (this *Node) OnPing(packet Packet) {
 func (this *Node) Pong(responseTo []byte) chan interface{} {
 	this.dht.logger.Debug(this, "< PONG")
 
-	data := this.newPacket(COMMAND_PONG, responseTo, []byte{})
-
-	return this.send(data)
+	return this.send([]Packet{this.newPacket(Command_PONG, responseTo, nil)})
 }
 
 func (this *Node) OnPong(packet Packet, cb CallbackChan) {
@@ -276,21 +340,20 @@ func (this *Node) OnPong(packet Packet, cb CallbackChan) {
 func (this *Node) Fetch(hash []byte) chan interface{} {
 	this.dht.logger.Debug(this, "< FETCH", hash)
 
-	data := this.newPacket(COMMAND_FETCH, []byte{}, hash)
+	data := this.newPacket(Command_FETCH, []byte{}, &Packet_Hash{Hash: hash})
 
-	return this.send(data)
+	return this.send([]Packet{data})
 }
 
 func (this *Node) OnFetch(packet Packet) {
 	this.dht.logger.Debug(this, "> FETCH")
 
-	var hash Hash
-	packet.GetData(&hash)
+	hash := packet.GetHash()
 
 	val, ok := this.dht.store[hex.EncodeToString(hash)]
 
 	if ok {
-		this.Found(packet, val)
+		this.Found(packet, hash, val)
 		return
 	}
 
@@ -300,31 +363,33 @@ func (this *Node) OnFetch(packet Packet) {
 func (this *Node) FetchNodes(hash []byte) chan interface{} {
 	this.dht.logger.Debug(this, "< FETCH NODES")
 
-	data := this.newPacket(COMMAND_FETCH_NODES, []byte{}, hash)
+	data := this.newPacket(Command_FETCH_NODES, []byte{}, &Packet_Hash{Hash: hash})
 
-	return this.send(data)
+	return this.send([]Packet{data})
 }
 
 func (this *Node) OnFetchNodes(packet Packet) {
 	this.dht.logger.Debug(this, "> FETCH NODES")
 
-	bucket := this.dht.routing.FindNode(packet.Data)
+	hash := packet.GetHash()
 
-	var nodesContact []PacketContact
+	bucket := this.dht.routing.FindNode(hash)
+
+	var nodesContact []*PacketContact
 
 	for _, contact := range bucket {
-		nodesContact = append(nodesContact, contact)
+		nodesContact = append(nodesContact, &contact)
 	}
 
 	this.FoundNodes(packet, nodesContact)
 }
 
-func (this *Node) FoundNodes(packet Packet, nodesContact []PacketContact) {
+func (this *Node) FoundNodes(packet Packet, nodesContact []*PacketContact) {
 	this.dht.logger.Debug(this, "< FOUND NODES")
 
-	data := this.newPacket(COMMAND_FOUND_NODES, packet.Header.MessageHash, nodesContact)
+	data := this.newPacket(Command_FOUND_NODES, packet.Header.MessageHash, &Packet_FoundNodes{FoundNodes: &FoundNodes{Nodes: nodesContact}})
 
-	this.send(data)
+	this.send([]Packet{data})
 }
 
 func (this *Node) OnFoundNodes(packet Packet, done CallbackChan) {
@@ -333,12 +398,117 @@ func (this *Node) OnFoundNodes(packet Packet, done CallbackChan) {
 	done.c <- packet
 }
 
-func (this *Node) Found(packet Packet, value []byte) {
+func (this *Node) createPartMessageHeaders(hash Hash, value []byte) (res []PartHeader) {
+	total := (len(value) / (BUFFER_SIZE - 128)) + 1
+
+	i := 0
+	for len(value) > 0 {
+		smalest := len(value)
+
+		if smalest > BUFFER_SIZE-128 {
+			smalest = BUFFER_SIZE - 128
+		}
+
+		toSend := value[:smalest]
+		value = value[smalest:]
+
+		partHeader := PartHeader{
+			Id:    int32(i),
+			Total: int32(total),
+			Hash:  hash,
+			Data:  toSend,
+		}
+
+		i++
+		res = append(res, partHeader)
+	}
+
+	return
+}
+
+func (this *Node) createFoundMessage(answerTo []byte, hash Hash, value []byte) []Packet {
+	this.dht.RLock()
+	msg, ok := this.dht.sentMsgs[string(hash)]
+	this.dht.RUnlock()
+
+	if ok {
+		return msg
+	}
+
+	found := Packet_Found{
+		Found: &Found{
+			Header: &PartHeader{
+				Data: value,
+			},
+		},
+	}
+
+	pack := this.newPacket(Command_FOUND, answerTo, &found)
+
+	parts := this.createPartMessageHeaders(hash, value)
+
+	res := []Packet{}
+
+	for _, part := range parts {
+		found.Found.Header = &part
+
+		pack.Data = &found
+
+		res = append(res, pack)
+	}
+
+	this.dht.Lock()
+	this.dht.sentMsgs[string(hash)] = res
+	this.dht.Unlock()
+
+	return res
+}
+
+func (this *Node) createStoreMessage(hash Hash, value []byte) []Packet {
+	this.dht.RLock()
+	msg, ok := this.dht.sentMsgs[string(hash)]
+	this.dht.RUnlock()
+
+	if ok {
+		return msg
+	}
+
+	store := Packet_Store{
+		Store: &Store{
+			Header: &PartHeader{
+				Hash: hash,
+				Data: value,
+			},
+		},
+	}
+
+	pack := this.newPacket(Command_STORE, []byte{}, &store)
+
+	parts := this.createPartMessageHeaders(hash, value)
+
+	res := []Packet{}
+
+	for _, part := range parts {
+		store.Store.Header = &part
+
+		pack.Data = &store
+
+		res = append(res, pack)
+	}
+
+	this.dht.Lock()
+	this.dht.sentMsgs[string(hash)] = res
+	this.dht.Unlock()
+
+	return res
+}
+
+func (this *Node) Found(packet Packet, hash Hash, value []byte) {
 	this.dht.logger.Debug(this, "< FOUND")
 
-	data := this.newPacketUngob(COMMAND_FOUND, packet.Header.MessageHash, value)
+	packets := this.createFoundMessage(packet.Header.MessageHash, hash, value)
 
-	this.send(data)
+	this.send(packets)
 }
 
 func (this *Node) OnFound(packet Packet, done CallbackChan) {
@@ -350,22 +520,21 @@ func (this *Node) OnFound(packet Packet, done CallbackChan) {
 func (this *Node) Store(hash Hash, value []byte) chan interface{} {
 	this.dht.logger.Debug(this, "< STORE")
 
-	data := this.newPacket(COMMAND_STORE, []byte{}, StoreInst{Hash: hash, Data: value})
+	packets := this.createStoreMessage(hash, value)
 
-	return this.send(data)
+	return this.send(packets)
 }
 
 func (this *Node) OnStore(packet Packet) {
 	this.dht.logger.Debug(this, "> STORE")
 
-	var stInst StoreInst
-	packet.GetData(&stInst)
+	stInst := packet.GetStore()
 
 	this.dht.Lock()
-	_, ok := this.dht.store[hex.EncodeToString(stInst.Hash)]
+	_, ok := this.dht.store[hex.EncodeToString(stInst.Header.Hash)]
 	this.dht.Unlock()
 
-	itemSize := len(stInst.Data)
+	itemSize := len(stInst.Header.Data)
 	storageSize := this.dht.StorageSize()
 
 	if ok ||
@@ -379,7 +548,7 @@ func (this *Node) OnStore(packet Packet) {
 	}
 
 	this.dht.Lock()
-	this.dht.store[hex.EncodeToString(stInst.Hash)] = stInst.Data
+	this.dht.store[hex.EncodeToString(stInst.Header.Hash)] = stInst.Header.Data
 	this.dht.Unlock()
 
 	this.Stored(packet, true)
@@ -388,9 +557,9 @@ func (this *Node) OnStore(packet Packet) {
 func (this *Node) Stored(packet Packet, hasStored bool) {
 	this.dht.logger.Debug(this, "< STORED")
 
-	data := this.newPacket(COMMAND_STORED, packet.Header.MessageHash, hasStored)
+	data := this.newPacket(Command_STORED, packet.Header.MessageHash, &Packet_Ok{Ok: hasStored})
 
-	this.send(data)
+	this.send([]Packet{data})
 }
 
 func (this *Node) OnStored(packet Packet, done CallbackChan) {
@@ -402,23 +571,24 @@ func (this *Node) OnStored(packet Packet, done CallbackChan) {
 func (this *Node) Custom(value interface{}) chan interface{} {
 	this.dht.logger.Debug(this, "< CUSTOM")
 
-	data := this.newPacket(COMMAND_CUSTOM, []byte{}, value)
+	// data := this.newPacket(Command_CUSTOM, []byte{}, &Custom{Data: value})
 
-	return this.send(data)
+	// return this.send([]Packet{data})
+	return this.send([]Packet{})
 }
 
 func (this *Node) OnCustom(packet Packet) {
 	this.dht.logger.Debug(this, "> CUSTOM")
 
-	res := this.dht.onCustomCmd(packet)
+	// res := this.dht.onCustomCmd(packet)
 	this.dht.logger.Debug(this, "< CUSTOM ANSWER")
 
-	if res == nil {
-		this.send(this.newPacket(COMMAND_CUSTOM_ANSWER, packet.Header.MessageHash, "Unknown"))
-		return
-	}
+	// if res == nil {
+	// 	this.send(this.newPacket(Command_CUSTOM_ANSWER, packet.Header.MessageHash, "Unknown"))
+	// 	return
+	// }
 
-	this.send(this.newPacket(COMMAND_CUSTOM_ANSWER, packet.Header.MessageHash, res))
+	// this.send(this.newPacket(Command_CUSTOM_ANSWER, packet.Header.MessageHash, res))
 }
 
 func (this *Node) OnCustomAnswer(packet Packet, done CallbackChan) {
@@ -433,9 +603,9 @@ func (this *Node) Broadcast(packet Packet) chan interface{} {
 	}
 
 	this.dht.logger.Debug(this, "< BROADCAST")
-	// data := this.newPacket(COMMAND_BROADCAST, "", value)
+	// data := this.newPacket(Command_BROADCAST, "", value)
 
-	return this.send(packet)
+	return this.send([]Packet{packet})
 }
 
 func (this *Node) OnBroadcast(packet Packet) {
@@ -450,7 +620,7 @@ func (this *Node) OnBroadcast(packet Packet) {
 	this.dht.Broadcast(packet)
 	this.dht.onBroadcast(packet)
 
-	// this.send(this.newPacket(COMMAND_NOOP, packet.Header.MessageHash, nil))
+	// this.send(this.newPacket(Command_NOOP, packet.Header.MessageHash, nil))
 }
 
 type RepeatCmd struct {
@@ -458,22 +628,22 @@ type RepeatCmd struct {
 	Value []int
 }
 
-func (this *Node) RepeatPlease(hash []byte, value []int) chan interface{} {
+func (this *Node) RepeatPlease(hash []byte, value []int32) chan interface{} {
 	this.dht.logger.Debug(this, "< REPEAT PLEASE", len(value))
 
-	data := this.newPacket(COMMAND_REPEAT_PLEASE, []byte{}, RepeatCmd{
-		Hash:  hash,
-		Value: value,
-	})
+	data := this.newPacket(Command_REPEAT_PLEASE, []byte{}, &Packet_RepeatPlease{
+		RepeatPlease: &RepeatPlease{
+			Hash: hash,
+			Data: value,
+		}})
 
-	return this.send(data)
+	return this.send([]Packet{data})
 }
 
 func (this *Node) OnRepeatPlease(packet Packet) {
-	var repeatCmd RepeatCmd
-	packet.GetData(&repeatCmd)
+	repeatCmd := packet.GetRepeatPlease()
 
-	missing := repeatCmd.Value
+	missing := repeatCmd.Data
 
 	this.dht.logger.Debug(this, "> REPEAT PLEASE")
 
@@ -500,7 +670,14 @@ func (this *Node) OnRepeatPlease(packet Packet) {
 
 	this.dht.logger.Debug(this, "< REPEATING")
 	for _, id := range missing {
-		_, err := this.dht.server.WriteTo(data[id], this.addr)
+		blob, err := proto.Marshal(&data[id])
+
+		if err != nil {
+			this.dht.Unlock()
+			return
+		}
+
+		_, err = this.dht.server.WriteTo(blob, this.addr)
 
 		if err != nil {
 			this.dht.Unlock()
@@ -510,110 +687,125 @@ func (this *Node) OnRepeatPlease(packet Packet) {
 	this.dht.Unlock()
 }
 
-type UDPWrapper struct {
-	Id    int
-	Total int
-	Hash  []byte
-	Data  []byte
-}
-type UDPWrapperList []UDPWrapper
+// type UDPWrapper struct {
+// 	Id    int
+// 	Total int
+// 	Hash  []byte
+// 	Data  []byte
+// }
+// type UDPWrapperList []UDPWrapper
 
-func (a UDPWrapperList) Len() int           { return len(a) }
-func (a UDPWrapperList) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a UDPWrapperList) Less(i, j int) bool { return a[i].Id < a[j].Id }
+// func (a UDPWrapperList) Len() int           { return len(a) }
+// func (a UDPWrapperList) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+// func (a UDPWrapperList) Less(i, j int) bool { return a[i].Id < a[j].Id }
 
-func CreateUDPWrappers(dht *Dht, packet Packet) ([][]byte, error) {
-	dht.RLock()
-	msg, ok := dht.sentMsgs[string(packet.Header.MessageHash)]
-	dht.RUnlock()
+// func CreateUDPWrappers(dht *Dht, packet Packet) ([][]byte, error) {
+// 	dht.RLock()
+// 	msg, ok := dht.sentMsgs[string(packet.Header.MessageHash)]
+// 	dht.RUnlock()
 
-	if ok {
-		return msg, nil
-	}
+// 	if ok {
+// 		return msg, nil
+// 	}
 
-	var blob bytes.Buffer
-	enc := gob.NewEncoder(&blob)
+// 	var blob bytes.Buffer
+// 	enc := gob.NewEncoder(&blob)
 
-	err := enc.Encode(packet)
+// 	err := enc.Encode(packet)
 
-	if err != nil {
-		return [][]byte{}, err
-	}
+// 	if err != nil {
+// 		return [][]byte{}, err
+// 	}
 
-	buff := blob.Bytes()
+// 	buff := blob.Bytes()
 
-	total := (len(buff) / (BUFFER_SIZE - 128)) + 1
+// 	total := (len(buff) / (BUFFER_SIZE - 128)) + 1
 
-	res := [][]byte{}
+// 	res := [][]byte{}
 
-	i := 0
-	for len(buff) > 0 {
-		smalest := len(buff)
+// 	i := 0
+// 	for len(buff) > 0 {
+// 		smalest := len(buff)
 
-		if smalest > BUFFER_SIZE-128 {
-			smalest = BUFFER_SIZE - 128
-		}
+// 		if smalest > BUFFER_SIZE-128 {
+// 			smalest = BUFFER_SIZE - 128
+// 		}
 
-		toSend := buff[:smalest]
-		buff = buff[smalest:]
+// 		toSend := buff[:smalest]
+// 		buff = buff[smalest:]
 
-		wrapper := UDPWrapper{
-			Id:    i,
-			Total: total,
-			Hash:  packet.Header.MessageHash,
-			Data:  toSend,
-		}
+// 		wrapper := UDPWrapper{
+// 			Id:    i,
+// 			Total: total,
+// 			Hash:  packet.Header.MessageHash,
+// 			Data:  toSend,
+// 		}
 
-		i++
+// 		i++
 
-		var blob bytes.Buffer
-		enc := gob.NewEncoder(&blob)
+// 		var blob bytes.Buffer
+// 		enc := gob.NewEncoder(&blob)
 
-		err := enc.Encode(wrapper)
+// 		err := enc.Encode(wrapper)
 
-		if err != nil {
-			return [][]byte{}, err
-		}
+// 		if err != nil {
+// 			return [][]byte{}, err
+// 		}
 
-		res = append(res, blob.Bytes())
-	}
+// 		res = append(res, blob.Bytes())
+// 	}
 
-	dht.Lock()
-	dht.sentMsgs[string(packet.Header.MessageHash)] = res
-	dht.Unlock()
+// 	dht.Lock()
+// 	dht.sentMsgs[string(packet.Header.MessageHash)] = res
+// 	dht.Unlock()
 
-	return res, nil
-}
+// 	return res, nil
+// }
 
-func (this *Node) send(packet Packet) chan interface{} {
-	// var blob bytes.Buffer
-	// enc := gob.NewEncoder(&blob)
-
-	// err := enc.Encode(packet)
-
+func (this *Node) send(packets []Packet) chan interface{} {
 	res := make(chan interface{})
-	packets, err := CreateUDPWrappers(this.dht, packet)
 
-	if err != nil {
-		res <- errors.New("Error creating UDP Wrapper" + err.Error())
+	if len(packets) == 0 {
+		res <- errors.New("Nothing to send")
 
 		return res
 	}
 
+	// check if all packets have same MessageHash
+
+	hash := packets[0].Header.MessageHash
+
 	timer := time.NewTimer(time.Second)
 
 	this.dht.Lock()
-	this.dht.commandQueue[hex.EncodeToString(packet.Header.MessageHash)] = CallbackChan{
+	this.dht.commandQueue[hex.EncodeToString(hash)] = CallbackChan{
 		timer: timer,
 		c:     res,
 	}
+	this.dht.Unlock()
+
+	toSend := [][]byte{}
 
 	for _, pack := range packets {
-		_, err = this.dht.server.WriteTo(pack, this.addr)
+		blob, err := proto.Marshal(&pack)
+
+		if err != nil {
+			res <- errors.New("Error Marshal" + err.Error())
+
+			return res
+		}
+
+		toSend = append(toSend, blob)
+	}
+
+	this.dht.Lock()
+	for _, pack := range toSend {
+		_, err := this.dht.server.WriteTo(pack, this.addr)
 
 		if err != nil {
 			res <- errors.New("Error Writing" + err.Error())
 
+			this.dht.Unlock()
 			return res
 		}
 	}
@@ -623,7 +815,7 @@ func (this *Node) send(packet Packet) chan interface{} {
 		<-timer.C
 
 		this.dht.Lock()
-		delete(this.dht.commandQueue, hex.EncodeToString(packet.Header.MessageHash))
+		delete(this.dht.commandQueue, hex.EncodeToString(hash))
 		this.dht.Unlock()
 
 		var err string
@@ -636,14 +828,14 @@ func (this *Node) send(packet Packet) chan interface{} {
 
 		res <- errors.New(err)
 
-		close(res)
+		// close(res)
 
 		// this.disconnect()
 	}()
 
 	this.dht.Lock()
 	defer this.dht.Unlock()
-	return this.dht.commandQueue[hex.EncodeToString(packet.Header.MessageHash)].c
+	return this.dht.commandQueue[hex.EncodeToString(hash)].c
 }
 
 func (this *Node) disconnect() {

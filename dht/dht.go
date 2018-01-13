@@ -134,11 +134,11 @@ func (this *Dht) republish() {
 	this.logger.Debug("Republished", len(this.store))
 }
 
-func (this *Dht) Store(value []byte) ([]byte, int, error) {
+func (this *Dht) Store(value []byte) (Hash, int, error) {
 	return this.StoreAt(NewHash(value), value)
 }
 
-func (this *Dht) StoreAt(hash []byte, value []byte) ([]byte, int, error) {
+func (this *Dht) StoreAt(hash Hash, value []byte) (Hash, int, error) {
 	if len(value) > this.options.MaxItemSize {
 		return []byte{}, 0, errors.New("Store: Exceeds max limit")
 	}
@@ -175,7 +175,7 @@ func (this *Dht) StoreAt(hash []byte, value []byte) ([]byte, int, error) {
 	return hash, storedOkNb, nil
 }
 
-func (this *Dht) Fetch(hash []byte) ([]byte, error) {
+func (this *Dht) Fetch(hash Hash) ([]byte, error) {
 	fn := func(node *Node) chan interface{} {
 		return node.Fetch(hash)
 	}
@@ -198,7 +198,7 @@ func (this *Dht) Fetch(hash []byte) ([]byte, error) {
 	return nil, errors.New("Unknown fetched data")
 }
 
-func (this *Dht) fetchNodes(hash []byte) []*Node {
+func (this *Dht) fetchNodes(hash Hash) []*Node {
 	fn := func(node *Node) chan interface{} {
 		return node.FetchNodes(hash)
 	}

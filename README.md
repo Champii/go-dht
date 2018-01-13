@@ -136,10 +136,10 @@ func New(DhtOptions) *Dht
 func (*Dht) Start() error
 func (*Dht) Stop()
 
-func (*Dht) Store(interface{}) ([]byte, int, error)
-func (*Dht) StoreAt([]byte, interface{}) ([]byte, int, error)
+func (*Dht) Store([]byte) (Hash, int, error)
+func (*Dht) StoreAt(Hash, []byte) (Hash, int, error)
 
-func (*Dht) Fetch([]byte) ([]byte, error)
+func (*Dht) Fetch(Hash) ([]byte, error)
 
 func (*Dht) CustomCmd(interface{})
 func (*Dht) Broadcast(interface{})
@@ -166,6 +166,7 @@ in coordination with `OnStore` callback, which can decide if the content is to b
 
 ## Todo
 
+- Fix this `Unknown response` error with same ResponseTo in some cases
 - Announce store before actually send to avoid sending data a node can't store
 - Store on disk
 - Storage spread when high demand (with timeout decay with distance over best storage)

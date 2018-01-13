@@ -75,10 +75,10 @@ type StoreInst struct {
 	Data []byte
 }
 
-type CustomCmd struct {
-	Command int
-	Data    []byte
-}
+// type CustomCmd struct {
+// 	Command int
+// 	Data    []byte
+// }
 
 var nonce int64 = 0
 
@@ -615,7 +615,9 @@ func (this *Node) OnStored(packet Packet, done CallbackChan) {
 func (this *Node) Custom(value interface{}) chan interface{} {
 	this.dht.logger.Debug(this, "< CUSTOM")
 
-	// data := this.newPacket(Command_CUSTOM, []byte{}, &Custom{Data: value})
+	// FIXME
+
+	// data := this.newPacket(Command_CUSTOM, []byte{}, &Packet_Custom{&Custom{value}})
 
 	// return this.send([]Packet{data})
 	return this.send([]Packet{})
@@ -624,15 +626,16 @@ func (this *Node) Custom(value interface{}) chan interface{} {
 func (this *Node) OnCustom(packet Packet) {
 	this.dht.logger.Debug(this, "> CUSTOM")
 
-	// res := this.dht.onCustomCmd(packet)
+	res := this.dht.onCustomCmd(packet)
 	this.dht.logger.Debug(this, "< CUSTOM ANSWER")
 
-	// if res == nil {
-	// 	this.send(this.newPacket(Command_CUSTOM_ANSWER, packet.Header.MessageHash, "Unknown"))
-	// 	return
-	// }
+	if res == nil {
+		// this.send([]Packet{this.newPacket(Command_CUSTOM_ANSWER, packet.Header.MessageHash, &Packet_CustomAnswer{&CustomAnswer{[]byte("Unknown")}})})
 
-	// this.send(this.newPacket(Command_CUSTOM_ANSWER, packet.Header.MessageHash, res))
+		return
+	}
+
+	this.send([]Packet{this.newPacket(Command_CUSTOM_ANSWER, packet.Header.MessageHash, &Packet_CustomAnswer{&CustomAnswer{res.([]byte)}})})
 }
 
 func (this *Node) OnCustomAnswer(packet Packet, done CallbackChan) {

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vmihailenco/msgpack"
+
 	"github.com/golang/protobuf/proto"
 
 	logging "github.com/op/go-logging"
@@ -403,11 +405,21 @@ func (this *Dht) Broadcast(data interface{}) {
 
 	var packet Packet
 	switch data.(type) {
+	case Packet_Broadcast:
+		packet = data.(Packet)
 	case Packet:
 		packet = data.(Packet)
 	default:
 		// Fixme
-		// packet = NewPacket(this, Command_BROADCAST, []byte{}, data)
+		h, err := msgpack.Marshal(data)
+
+		if err != nil {
+			this.logger.Error("Cannot broadcast")
+
+			return
+		}
+
+		packet = NewPacket(this, Command_BROADCAST, []byte{}, &Packet_Broadcast{&Broadcast{h}})
 	}
 
 	for _, contact := range bucket {

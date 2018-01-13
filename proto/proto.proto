@@ -71,6 +71,7 @@ message Broadcast {
 }
 
 message Custom {
+  Command Command = 1;
   bytes Data = 2;
 }
 

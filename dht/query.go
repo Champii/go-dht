@@ -85,6 +85,7 @@ func (this *Query) WaitResult() interface{} {
 		case error:
 			this.workerQueue.OnDone()
 			continue
+
 		case Packet:
 			packet := res.(Packet)
 
@@ -94,6 +95,7 @@ func (this *Query) WaitResult() interface{} {
 
 			case Command_STORED:
 				storeAnswers = append(storeAnswers, packet.GetOk())
+
 			case Command_FOUND_NODES:
 				toAdd := packet.GetFoundNodes().Nodes
 

@@ -219,11 +219,9 @@ func (this *Dht) bootstrap() error {
 
 	bootstrapNode := NewNode(this, addr, []byte{})
 
-	// this.routing.AddNode(bootstrapNode)
+	// this.routing.AddNode(bootstrapNode.contact)
 
-	err, ok := (<-bootstrapNode.Ping()).(error)
-
-	if ok {
+	if err, hasErr := (<-bootstrapNode.Ping()).(error); hasErr {
 		return err
 	}
 
@@ -256,7 +254,7 @@ func (this *Dht) Start() error {
 
 	this.hash = NewRandomHash()
 
-	this.logger.Debug("Own hash", hex.EncodeToString(this.hash))
+	this.logger.Info("Own hash", hex.EncodeToString(this.hash))
 
 	l, err := net.ListenPacket("udp", this.options.ListenAddr)
 
@@ -331,7 +329,6 @@ func (this *Dht) Stop() {
 	this.running = false
 
 	this.server.Close()
-
 }
 
 func (this *Dht) handleInPacket(addr net.Addr, blob []byte) {
@@ -354,6 +351,8 @@ func (this *Dht) handleInPacket(addr net.Addr, blob []byte) {
 	}
 
 	node = NewNodeContact(this, addr, *packet.Header.Sender)
+
+	// this.logger.Info("Got packet", packet.Header.Sender.Addr)
 
 	this.routing.AddNode(*packet.Header.Sender)
 

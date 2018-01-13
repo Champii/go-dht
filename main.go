@@ -102,7 +102,7 @@ func fetchFromHash(node *dht.Dht, hashStr string) {
 		return
 	}
 
-	time.Sleep(time.Second)
+	// time.Sleep(time.Second)
 
 	b, err := node.Fetch(hash)
 
@@ -118,7 +118,7 @@ func fetchFromHash(node *dht.Dht, hashStr string) {
 func fetchAt(node *dht.Dht, hashStr string) {
 	hash := dht.NewHash([]byte(hashStr))
 
-	time.Sleep(time.Second)
+	// time.Sleep(time.Second)
 
 	b, err := node.Fetch(hash)
 

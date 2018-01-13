@@ -28,6 +28,7 @@ message PacketHeader {
   PacketContact Sender = 3;
   bytes MessageHash = 4;
   bytes ResponseTo = 5;
+  int64 Nonce = 6;
 }
 
 message Packet {

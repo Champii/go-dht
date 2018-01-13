@@ -80,11 +80,14 @@ type CustomCmd struct {
 	Data    []byte
 }
 
+var nonce int64 = 0
+
 func NewPacket(dht *Dht, command Command, responseTo Hash, data isPacket_Data) Packet {
 	addr, err := net.ResolveUDPAddr("udp", dht.options.ListenAddr)
 
 	packet := Packet{
 		Header: &PacketHeader{
+			Nonce:       nonce,
 			DateSent:    time.Now().UnixNano(),
 			Command:     command,
 			ResponseTo:  responseTo,
@@ -97,7 +100,9 @@ func NewPacket(dht *Dht, command Command, responseTo Hash, data isPacket_Data) P
 		Data: data,
 	}
 
-	tmp, err := msgpack.Marshal(&packet)
+	nonce++
+
+	tmp, err := msgpack.Marshal(&packet.Header)
 
 	if err != nil {
 		dht.logger.Warning(err)
@@ -245,10 +250,13 @@ func (this *Node) Redacted() interface{} {
 
 func (this *Node) handleResponseTo(packet Packet) {
 	this.dht.Lock()
-	cb, ok := this.dht.commandQueue[hex.EncodeToString(packet.Header.ResponseTo)]
+
+	cmdQueueHash := hex.EncodeToString(packet.Header.ResponseTo)
+
+	cb, ok := this.dht.commandQueue[cmdQueueHash]
 
 	if !ok {
-		this.dht.logger.Info(this, "x Unknown response: ", hex.EncodeToString(packet.Header.ResponseTo), packet)
+		this.dht.logger.Info(this, "x Unknown response: ", cmdQueueHash, len(this.dht.commandQueue))
 		this.dht.Unlock()
 		return
 	}
@@ -277,7 +285,7 @@ func (this *Node) handleResponseTo(packet Packet) {
 
 	this.dht.Lock()
 	// close(cb.c)
-	delete(this.dht.commandQueue, hex.EncodeToString(packet.Header.ResponseTo))
+	delete(this.dht.commandQueue, cmdQueueHash)
 	this.dht.Unlock()
 }
 
@@ -432,6 +440,12 @@ func (this *Node) createFoundMessage(answerTo []byte, hash Hash, value []byte) [
 	this.dht.RUnlock()
 
 	if ok {
+		ref := updatePacketHeaderDate(msg[0].Header, answerTo)
+
+		for i := range msg {
+			msg[i].Header = &ref
+		}
+
 		return msg
 	}
 
@@ -464,12 +478,39 @@ func (this *Node) createFoundMessage(answerTo []byte, hash Hash, value []byte) [
 	return res
 }
 
+func updatePacketHeaderDate(inHeader *PacketHeader, answerTo Hash) PacketHeader {
+	header := *inHeader
+
+	header.DateSent = time.Now().UnixNano()
+	header.ResponseTo = answerTo
+
+	nonce++
+
+	header.Nonce = nonce
+
+	tmp, err := msgpack.Marshal(&header)
+
+	if err != nil {
+		return PacketHeader{}
+	}
+
+	header.MessageHash = NewHash(tmp)
+
+	return header
+}
+
 func (this *Node) createStoreMessage(hash Hash, value []byte) []Packet {
 	this.dht.RLock()
 	msg, ok := this.dht.sentMsgs[string(hash)]
 	this.dht.RUnlock()
 
 	if ok {
+		ref := updatePacketHeaderDate(msg[0].Header, []byte{})
+
+		for i := range msg {
+			msg[i].Header = &ref
+		}
+
 		return msg
 	}
 
@@ -522,6 +563,8 @@ func (this *Node) Store(hash Hash, value []byte) chan interface{} {
 
 	packets := this.createStoreMessage(hash, value)
 
+	// this.dht.logger.Info("STORE WESH", packets[0].Header.MessageHash)
+
 	return this.send(packets)
 }
 
@@ -565,6 +608,7 @@ func (this *Node) Stored(packet Packet, hasStored bool) {
 func (this *Node) OnStored(packet Packet, done CallbackChan) {
 	this.dht.logger.Debug(this, "> STORED")
 
+	// this.dht.logger.Info("STORED WESH", packet.Header.ResponseTo)
 	done.c <- packet
 }
 
@@ -658,7 +702,9 @@ func (this *Node) OnRepeatPlease(packet Packet) {
 		return
 	}
 
-	cmd, ok := this.dht.commandQueue[hex.EncodeToString(hash)]
+	cmdQueueHash := hex.EncodeToString(hash)
+
+	cmd, ok := this.dht.commandQueue[cmdQueueHash]
 
 	if !ok {
 		this.dht.Unlock()
@@ -666,7 +712,7 @@ func (this *Node) OnRepeatPlease(packet Packet) {
 	}
 
 	cmd.timer.Stop()
-	cmd.timer = time.NewTimer(time.Second)
+	cmd.timer = time.NewTimer(time.Millisecond * 100)
 
 	this.dht.logger.Debug(this, "< REPEATING")
 	for _, id := range missing {
@@ -771,17 +817,23 @@ func (this *Node) send(packets []Packet) chan interface{} {
 		return res
 	}
 
-	// check if all packets have same MessageHash
+	// TODO: check if all packets have same MessageHash
 
 	hash := packets[0].Header.MessageHash
 
-	timer := time.NewTimer(time.Second)
+	timer := time.NewTimer(time.Millisecond * 100)
+
+	cmdQueueHash := hex.EncodeToString(hash)
 
 	this.dht.Lock()
-	this.dht.commandQueue[hex.EncodeToString(hash)] = CallbackChan{
+	this.dht.commandQueue[cmdQueueHash] = CallbackChan{
 		timer: timer,
 		c:     res,
 	}
+
+	// this.dht.logger.Warning("ADD CMD QUEUE", cmdQueueHash, hex.EncodeToString(packets[0].Header.ResponseTo))
+	// this.dht.logger.Warning("ADD CMD QUEUE", cmdQueueHash)
+
 	this.dht.Unlock()
 
 	toSend := [][]byte{}
@@ -815,7 +867,7 @@ func (this *Node) send(packets []Packet) chan interface{} {
 		<-timer.C
 
 		this.dht.Lock()
-		delete(this.dht.commandQueue, hex.EncodeToString(hash))
+		delete(this.dht.commandQueue, cmdQueueHash)
 		this.dht.Unlock()
 
 		var err string
@@ -835,13 +887,10 @@ func (this *Node) send(packets []Packet) chan interface{} {
 
 	this.dht.Lock()
 	defer this.dht.Unlock()
-	return this.dht.commandQueue[hex.EncodeToString(hash)].c
+	return this.dht.commandQueue[cmdQueueHash].c
 }
 
 func (this *Node) disconnect() {
-	// this.dht.Lock()
-	// defer this.dht.Unlock()
-
 	this.dht.routing.RemoveNode(this.contact)
 
 	// for _, res := range this.dht.commandQueue {

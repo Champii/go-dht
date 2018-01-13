@@ -103,6 +103,7 @@ func (this *Routing) distanceBetwin(hash1, hash2 []byte) int {
 }
 
 func (this *Routing) AddNode(contact PacketContact) {
+
 	if _, err := this.GetNode(contact.Hash); err == nil {
 		return
 	}

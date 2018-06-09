@@ -27,8 +27,9 @@ type Dht struct {
 	logger        *logging.Logger
 	server        net.PacketConn
 	gotBroadcast  [][]byte
-	messageChunks map[string]WaitingPartMsg
+	messageChunks map[string]*WaitingMsg
 	sentMsgs      map[string][]Packet
+	middlewares   []IMiddleware
 }
 
 type DhtOptions struct {
@@ -39,20 +40,11 @@ type DhtOptions struct {
 	Cluster           int
 	Stats             bool
 	Interactif        bool
-	OnStore           func(Packet) bool
-	OnCustomCmd       func(Packet) interface{}
-	OnBroadcast       func(Packet) interface{}
-	MaxStorageSize    int
-	MaxItemSize       int
-}
-
-type WaitingPartMsg struct {
-	timer   *time.Timer
-	timeout *time.Timer
-	hash    []byte
-	addr    net.Addr
-	total   int32
-	parts   [][]byte
+	// OnStore           func(Packet) bool
+	// OnCustomCmd       func(Packet) interface{}
+	// OnBroadcast       func(Packet) interface{}
+	MaxStorageSize int
+	MaxItemSize    int
 }
 
 func New(options DhtOptions) *Dht {
@@ -70,7 +62,7 @@ func New(options DhtOptions) *Dht {
 		running:       false,
 		store:         make(map[string][]byte),
 		commandQueue:  make(map[string]CallbackChan),
-		messageChunks: make(map[string]WaitingPartMsg),
+		messageChunks: make(map[string]*WaitingMsg),
 		sentMsgs:      make(map[string][]Packet),
 		logger:        logging.MustGetLogger("dht"),
 	}
@@ -125,6 +117,10 @@ func initLogger(dht *Dht) {
 	backendLeveled.SetLevel(logLevel, "")
 
 	logging.SetBackend(backendLeveled)
+}
+
+func (this *Dht) MessageChunks() map[string]*WaitingMsg {
+	return this.messageChunks
 }
 
 func (this *Dht) republish() {
@@ -441,24 +437,30 @@ func (this *Dht) Wait() {
 }
 
 func (this *Dht) onCustomCmd(packet Packet) interface{} {
-	if this.options.OnCustomCmd != nil {
-		return this.options.OnCustomCmd(packet)
+	for _, m := range this.middlewares {
+		if res := m.OnCustomCmd(packet); res != nil {
+			return res
+		}
 	}
 
 	return nil
 }
 
 func (this *Dht) onBroadcast(packet Packet) interface{} {
-	if this.options.OnBroadcast != nil {
-		return this.options.OnBroadcast(packet)
+	for _, m := range this.middlewares {
+		if res := m.OnBroadcast(packet); res != nil {
+			return res
+		}
 	}
 
 	return nil
 }
 
 func (this *Dht) onStore(packet Packet) bool {
-	if this.options.OnStore != nil {
-		return this.options.OnStore(packet)
+	for _, m := range this.middlewares {
+		if res := m.OnStore(packet); res != true {
+			return res
+		}
 	}
 
 	return true

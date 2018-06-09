@@ -271,7 +271,17 @@ func (this *Node) handleResponseTo(packet Packet) {
 	case Command_PONG:
 		this.OnPong(packet, cb)
 	case Command_FOUND:
-		this.OnFound(packet, cb)
+		this.accumulate(packet, *packet.GetFound().Header, func(p Packet, err error) {
+			delete(this.dht.MessageChunks(), string(packet.GetFound().Header.Hash))
+
+			if err != nil {
+				this.dht.Logger().Error(err)
+
+				return
+			}
+
+			this.OnFound(p, cb)
+		})
 	case Command_FOUND_NODES:
 		this.OnFoundNodes(packet, cb)
 	case Command_STORED:
@@ -289,6 +299,22 @@ func (this *Node) handleResponseTo(packet Packet) {
 	this.dht.Unlock()
 }
 
+func (this *Node) accumulate(packet Packet, pHeader PartHeader, cb WaitingCB) {
+	this.dht.Lock()
+	messageChunks := this.dht.MessageChunks()
+	hash := string(pHeader.Hash)
+
+	waiting, exists := messageChunks[hash]
+
+	this.dht.Unlock()
+
+	if !exists || waiting == nil {
+		messageChunks[hash] = NewWaitingMsg(packet, pHeader, cb)
+	} else {
+		waiting.AddPart(pHeader)
+	}
+}
+
 func (this *Node) handleRequest(packet Packet) {
 	switch packet.Header.Command {
 	case Command_NOOP:
@@ -301,7 +327,18 @@ func (this *Node) handleRequest(packet Packet) {
 	case Command_BROADCAST:
 		this.OnBroadcast(packet)
 	case Command_STORE:
-		this.OnStore(packet)
+		this.accumulate(packet, *packet.GetStore().Header, func(p Packet, err error) {
+			delete(this.dht.MessageChunks(), string(packet.GetStore().Header.Hash))
+
+			if err != nil {
+				this.dht.Logger().Error(err)
+
+				return
+			}
+
+			this.OnStore(p)
+		})
+		// this.OnStore(packet)
 	case Command_CUSTOM:
 		this.OnCustom(packet)
 	case Command_REPEAT_PLEASE:
@@ -449,24 +486,18 @@ func (this *Node) createFoundMessage(answerTo []byte, hash Hash, value []byte) [
 		return msg
 	}
 
-	found := Packet_Found{
-		Found: &Found{
-			Header: &PartHeader{
-				Data: value,
-			},
-		},
-	}
-
-	pack := this.newPacket(Command_FOUND, answerTo, &found)
-
 	parts := this.createPartMessageHeaders(hash, value)
 
 	res := []Packet{}
 
-	for _, part := range parts {
-		found.Found.Header = &part
+	for i := range parts {
+		found := Packet_Found{
+			Found: &Found{
+				Header: &parts[i],
+			},
+		}
 
-		pack.Data = &found
+		pack := this.newPacket(Command_FOUND, answerTo, &found)
 
 		res = append(res, pack)
 	}
@@ -514,25 +545,18 @@ func (this *Node) createStoreMessage(hash Hash, value []byte) []Packet {
 		return msg
 	}
 
-	store := Packet_Store{
-		Store: &Store{
-			Header: &PartHeader{
-				Hash: hash,
-				Data: value,
-			},
-		},
-	}
-
-	pack := this.newPacket(Command_STORE, []byte{}, &store)
-
 	parts := this.createPartMessageHeaders(hash, value)
 
 	res := []Packet{}
 
-	for _, part := range parts {
-		store.Store.Header = &part
+	for i := range parts {
+		store := Packet_Store{
+			Store: &Store{
+				Header: &parts[i],
+			},
+		}
 
-		pack.Data = &store
+		pack := this.newPacket(Command_STORE, []byte{}, &store)
 
 		res = append(res, pack)
 	}
@@ -736,81 +760,6 @@ func (this *Node) OnRepeatPlease(packet Packet) {
 	this.dht.Unlock()
 }
 
-// type UDPWrapper struct {
-// 	Id    int
-// 	Total int
-// 	Hash  []byte
-// 	Data  []byte
-// }
-// type UDPWrapperList []UDPWrapper
-
-// func (a UDPWrapperList) Len() int           { return len(a) }
-// func (a UDPWrapperList) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-// func (a UDPWrapperList) Less(i, j int) bool { return a[i].Id < a[j].Id }
-
-// func CreateUDPWrappers(dht *Dht, packet Packet) ([][]byte, error) {
-// 	dht.RLock()
-// 	msg, ok := dht.sentMsgs[string(packet.Header.MessageHash)]
-// 	dht.RUnlock()
-
-// 	if ok {
-// 		return msg, nil
-// 	}
-
-// 	var blob bytes.Buffer
-// 	enc := gob.NewEncoder(&blob)
-
-// 	err := enc.Encode(packet)
-
-// 	if err != nil {
-// 		return [][]byte{}, err
-// 	}
-
-// 	buff := blob.Bytes()
-
-// 	total := (len(buff) / (BUFFER_SIZE - 128)) + 1
-
-// 	res := [][]byte{}
-
-// 	i := 0
-// 	for len(buff) > 0 {
-// 		smalest := len(buff)
-
-// 		if smalest > BUFFER_SIZE-128 {
-// 			smalest = BUFFER_SIZE - 128
-// 		}
-
-// 		toSend := buff[:smalest]
-// 		buff = buff[smalest:]
-
-// 		wrapper := UDPWrapper{
-// 			Id:    i,
-// 			Total: total,
-// 			Hash:  packet.Header.MessageHash,
-// 			Data:  toSend,
-// 		}
-
-// 		i++
-
-// 		var blob bytes.Buffer
-// 		enc := gob.NewEncoder(&blob)
-
-// 		err := enc.Encode(wrapper)
-
-// 		if err != nil {
-// 			return [][]byte{}, err
-// 		}
-
-// 		res = append(res, blob.Bytes())
-// 	}
-
-// 	dht.Lock()
-// 	dht.sentMsgs[string(packet.Header.MessageHash)] = res
-// 	dht.Unlock()
-
-// 	return res, nil
-// }
-
 func (this *Node) send(packets []Packet) chan interface{} {
 	res := make(chan interface{})
 
@@ -854,16 +803,18 @@ func (this *Node) send(packets []Packet) chan interface{} {
 	}
 
 	this.dht.Lock()
+
 	for _, pack := range toSend {
 		_, err := this.dht.server.WriteTo(pack, this.addr)
 
 		if err != nil {
+			this.dht.Unlock()
 			res <- errors.New("Error Writing" + err.Error())
 
-			this.dht.Unlock()
 			return res
 		}
 	}
+
 	this.dht.Unlock()
 
 	go func() {

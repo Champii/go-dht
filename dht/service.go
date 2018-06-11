@@ -98,7 +98,7 @@ func (this *Service) Store(ctx context.Context, req *StoreRequest, res *Response
 	storageSize := this.Dht.StorageSize()
 
 	if ok ||
-		!this.Dht.onStore(*req) ||
+		!this.Dht.onStore(req) ||
 		itemSize > this.Dht.options.MaxItemSize ||
 		itemSize+storageSize > this.Dht.options.MaxStorageSize {
 

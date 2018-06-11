@@ -2,6 +2,10 @@ package dht
 
 import "time"
 
+type Request interface {
+	GetRequest()
+}
+
 type PacketContact struct {
 	Hash []byte
 	Addr string
@@ -17,10 +21,18 @@ type FetchRequest struct {
 	Hash   []byte
 }
 
+func (this FetchRequest) GetRequest() {
+
+}
+
 type StoreRequest struct {
 	Header PacketHeader
 	Hash   []byte
 	Data   []byte
+}
+
+func (this StoreRequest) GetRequest() {
+
 }
 
 type Response struct {

@@ -39,11 +39,8 @@ type DhtOptions struct {
 	Cluster           int
 	Stats             bool
 	Interactif        bool
-	// OnStore           func(Packet) bool
-	// OnCustomCmd       func(Packet) interface{}
-	// OnBroadcast       func(Packet) interface{}
-	MaxStorageSize int
-	MaxItemSize    int
+	MaxStorageSize    int
+	MaxItemSize       int
 }
 
 func New(options DhtOptions) *Dht {
@@ -68,15 +65,6 @@ func New(options DhtOptions) *Dht {
 	res.routing.dht = res
 
 	res.logger.Debug("DHT version 0.0.1")
-
-	r := rand.Intn(60) - 60
-	timer := time.NewTicker(time.Minute*10 + (time.Second * time.Duration(r)))
-
-	go func() {
-		for range timer.C {
-			res.republish()
-		}
-	}()
 
 	return res
 }
@@ -129,6 +117,15 @@ func (this *Dht) Start() error {
 	}
 
 	this.hash = NewRandomHash()
+
+	r := rand.Intn(60) - 60
+	timer := time.NewTicker(time.Minute*10 + (time.Second * time.Duration(r)))
+
+	go func() {
+		for range timer.C {
+			this.republish()
+		}
+	}()
 
 	this.logger.Info("Own hash", hex.EncodeToString(this.hash))
 
@@ -287,8 +284,22 @@ func (this *Dht) Wait() {
 // 	return nil
 // }
 
-func (this *Dht) onStore(packet StoreRequest) bool {
-	for _, m := range this.middlewares {
+func reverse(middle []IMiddleware) []IMiddleware {
+	if len(middle) <= 1 {
+		return middle
+	}
+
+	newmiddle := make([]IMiddleware, len(middle))
+
+	for i, j := 0, len(middle)-1; i < j; i, j = i+1, j-1 {
+		newmiddle[i], newmiddle[j] = middle[j], middle[i]
+	}
+
+	return newmiddle
+}
+
+func (this *Dht) onStore(packet *StoreRequest) bool {
+	for _, m := range reverse(this.middlewares) {
 		if res := m.OnStore(packet); res != true {
 			return res
 		}
@@ -297,12 +308,26 @@ func (this *Dht) onStore(packet StoreRequest) bool {
 	return true
 }
 
+func (this *Dht) beforeSendStore(packet *StoreRequest) *StoreRequest {
+	for _, m := range this.middlewares {
+		if res := m.BeforeSendStore(packet); res != nil {
+			packet = res
+		}
+	}
+
+	return packet
+}
+
 func (this *Dht) GetConnectedNumber() int {
 	return this.routing.Size()
 }
 
 func (this *Dht) StoredKeys() int {
 	return len(this.store)
+}
+
+func (this *Dht) Storage() map[string][]byte {
+	return this.store
 }
 
 func (this *Dht) StorageSize() int {
@@ -315,4 +340,8 @@ func (this *Dht) StorageSize() int {
 	}
 
 	return size
+}
+
+func Compare(a []byte, b []byte) int {
+	return compare(a, b)
 }

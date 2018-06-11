@@ -14,25 +14,35 @@ type Node struct {
 }
 
 func NewNode(d *Dht, contact PacketContact) *Node {
+	return &Node{
+		Dht:     d,
+		Contact: contact,
+	}
+}
+
+func (this *Node) Connect() error {
+	if this.Client != nil {
+		return nil
+	}
+
 	option := client.DefaultOption
 	option.Block = bc
 
 	xclient := client.NewClient(option)
 
-	if err := xclient.Connect("kcp", contact.Addr); err != nil {
-		d.logger.Error(err)
+	if err := xclient.Connect("kcp", this.Contact.Addr); err != nil {
+		this.Dht.logger.Error(err)
 
-		return nil
+		return err
 	}
 
-	return &Node{
-		Dht:     d,
-		Contact: contact,
-		Client:  xclient,
-	}
+	this.Client = xclient
+	return nil
 }
 
 func (this *Node) Ping() *Response {
+	this.Connect()
+
 	this.Dht.logger.Debug(this, "< PING")
 
 	req := NewHeader(this.Dht)
@@ -58,6 +68,8 @@ func (this *Node) Ping() *Response {
 }
 
 func (this *Node) FetchNodes(hash []byte) *Response {
+	this.Connect()
+
 	this.Dht.logger.Debug(this, "< FETCH NODES", hex.EncodeToString(hash))
 
 	req := NewFetchRequest(this.Dht, hash)
@@ -83,6 +95,8 @@ func (this *Node) FetchNodes(hash []byte) *Response {
 }
 
 func (this *Node) Fetch(hash []byte) *Response {
+	this.Connect()
+
 	this.Dht.logger.Debug(this, "< FETCH", hex.EncodeToString(hash))
 
 	req := NewFetchRequest(this.Dht, hash)
@@ -112,9 +126,14 @@ func (this *Node) Fetch(hash []byte) *Response {
 }
 
 func (this *Node) Store(hash []byte, data []byte) *Response {
-	this.Dht.logger.Debug(this, "< STORE", hex.EncodeToString(hash), len(data))
+	this.Connect()
+
 	req := NewStoreRequest(this.Dht, hash, data)
 	res := &Response{}
+
+	req = this.Dht.beforeSendStore(req)
+
+	this.Dht.logger.Debug(this, "< STORE", hex.EncodeToString(hash), len(req.Data))
 
 	err := this.Client.Call(context.Background(), "Service", "Store", req, res)
 

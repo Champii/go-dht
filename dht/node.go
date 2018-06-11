@@ -148,7 +148,7 @@ func (this *Node) Store(hash []byte, data []byte) *Response {
 	}
 
 	if res.Ok {
-		this.Dht.logger.Debug(this, "> STORED", hex.EncodeToString(hash), len(data))
+		this.Dht.logger.Debug(this, "> STORED", hex.EncodeToString(hash), len(req.Data))
 	} else {
 		this.Dht.logger.Debug(this, "> NOT STORED", hex.EncodeToString(hash))
 	}

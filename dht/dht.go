@@ -299,6 +299,7 @@ func reverse(middle []IMiddleware) []IMiddleware {
 }
 
 func (this *Dht) onStore(packet *StoreRequest) bool {
+	//todo: perfs
 	for _, m := range reverse(this.middlewares) {
 		if res := m.OnStore(packet); res != true {
 			return res

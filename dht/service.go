@@ -90,15 +90,10 @@ func (this *Service) Store(ctx context.Context, req *StoreRequest, res *Response
 
 	*res = *NewEmptyResponse(this.Dht)
 
-	this.Dht.Lock()
-	_, ok := this.Dht.store[hex.EncodeToString(req.Hash)]
-	this.Dht.Unlock()
-
 	itemSize := len(req.Data)
 	storageSize := this.Dht.StorageSize()
 
-	if ok ||
-		!this.Dht.onStore(req) ||
+	if !this.Dht.onStore(req) ||
 		itemSize > this.Dht.options.MaxItemSize ||
 		itemSize+storageSize > this.Dht.options.MaxStorageSize {
 

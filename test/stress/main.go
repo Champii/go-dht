@@ -40,10 +40,10 @@ func seed(nb int, client *dht.Dht) {
 		bs := make([]byte, 4)
 		binary.LittleEndian.PutUint32(bs, uint32(i))
 
-		_, n, err := client.StoreAt(dht.NewHash([]byte(strconv.Itoa(i))), bs)
+		_, err := client.StoreAt(dht.NewHash([]byte(strconv.Itoa(i))), bs)
 
-		if err != nil || n == 0 {
-			fmt.Println("Error seeding node", i, "on", nb, ":", n, err)
+		if err != nil {
+			fmt.Println("Error seeding node", i, "on", nb, ":", err)
 
 			os.Exit(0)
 		}

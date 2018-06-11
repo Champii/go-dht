@@ -128,15 +128,15 @@ func (this *Query) processContact(contact *PacketContact) {
 
 	n := NewNode(this.dht, *contact)
 
-	res := n.Ping()
+	// res := n.Ping()
 
 	this.Lock()
 	this.blacklist = append(this.blacklist, n)
 	this.Unlock()
 
-	if res.Err != nil {
-		return
-	}
+	// if res.Err != nil {
+	// 	return
+	// }
 
 	this.tryAddToBest(n)
 }

@@ -48,16 +48,10 @@ func storeFromStdin(node *dht.Dht) {
 		return
 	}
 
-	hash, nb, err := node.Store(res)
+	hash, err := node.Store(res)
 
 	if err != nil {
 		node.Logger().Critical("Cannot store", err)
-
-		return
-	}
-
-	if nb == 0 {
-		node.Logger().Critical("Cannot store, no nodes found")
 
 		return
 	}
@@ -76,16 +70,10 @@ func storeAt(node *dht.Dht, hashStr string) {
 
 	hash := dht.NewHash([]byte(hashStr))
 
-	_, nb, err := node.StoreAt(hash, res)
+	_, err = node.StoreAt(hash, res)
 
 	if err != nil {
 		node.Logger().Critical("Cannot store", err)
-
-		return
-	}
-
-	if nb == 0 {
-		node.Logger().Critical("Cannot store, no nodes found")
 
 		return
 	}
@@ -161,6 +149,8 @@ func cluster(options dht.DhtOptions) {
 
 		i++
 	}
+
+	time.Sleep(time.Second)
 
 	for ; i < options.Cluster; i++ {
 		options2 := options

@@ -4,8 +4,8 @@ import (
 	"sync"
 )
 
-type WorkerJob func() chan interface{}
-type WorkerResult interface{}
+type WorkerJob func() *Response
+type WorkerResult *Response
 
 type WorkerQueue struct {
 	sync.RWMutex
@@ -27,13 +27,10 @@ func NewWorkerQueue(size, buffer int) *WorkerQueue {
 
 func (this *WorkerQueue) worker(id int) {
 	for j := range this.jobs {
-		val, _ := <-j()
-		// if !ok {
-		// 	return
-		// }
-		this.Results <- val
+		res := j()
+
+		this.Results <- res
 	}
-	// this.onDone()
 }
 
 func (this *WorkerQueue) OnDone() {

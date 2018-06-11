@@ -48,14 +48,14 @@ func (this *Dht) Cli() {
 				continue
 			}
 
-			hash, nb, err := this.Store([]byte(splited[1]))
+			hash, err := this.Store([]byte(splited[1]))
 			if err != nil {
 				fmt.Println(err.Error())
 
 				continue
 			}
 
-			fmt.Println(hex.EncodeToString(hash), nb)
+			fmt.Println(hex.EncodeToString(hash))
 		case "f":
 			if len(splited) != 2 || len(splited[1]) != BUCKET_SIZE*2 {
 				fmt.Println("Usage: f key")

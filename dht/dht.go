@@ -1,35 +1,34 @@
 package dht
 
 import (
+	"crypto/sha1"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math/rand"
-	"net"
 	"os"
 	"sync"
 	"time"
 
-	"github.com/vmihailenco/msgpack"
-
-	"github.com/golang/protobuf/proto"
+	"github.com/smallnest/rpcx/log"
+	"github.com/smallnest/rpcx/server"
+	kcp "github.com/xtaci/kcp-go"
+	"golang.org/x/crypto/pbkdf2"
 
 	logging "github.com/op/go-logging"
 )
 
 type Dht struct {
 	sync.RWMutex
-	routing       *Routing
-	options       DhtOptions
-	hash          []byte
-	running       bool
-	store         map[string][]byte
-	commandQueue  map[string]CallbackChan
-	logger        *logging.Logger
-	server        net.PacketConn
-	gotBroadcast  [][]byte
-	messageChunks map[string]*WaitingMsg
-	sentMsgs      map[string][]Packet
-	middlewares   []IMiddleware
+	routing      *Routing
+	options      DhtOptions
+	hash         []byte
+	running      bool
+	store        map[string][]byte
+	logger       *logging.Logger
+	server       *server.Server
+	gotBroadcast [][]byte
+	middlewares  []IMiddleware
 }
 
 type DhtOptions struct {
@@ -57,14 +56,11 @@ func New(options DhtOptions) *Dht {
 	}
 
 	res := &Dht{
-		routing:       NewRouting(),
-		options:       options,
-		running:       false,
-		store:         make(map[string][]byte),
-		commandQueue:  make(map[string]CallbackChan),
-		messageChunks: make(map[string]*WaitingMsg),
-		sentMsgs:      make(map[string][]Packet),
-		logger:        logging.MustGetLogger("dht"),
+		routing: NewRouting(),
+		options: options,
+		running: false,
+		store:   make(map[string][]byte),
+		logger:  logging.MustGetLogger("dht"),
 	}
 
 	initLogger(res)
@@ -119,131 +115,13 @@ func initLogger(dht *Dht) {
 	logging.SetBackend(backendLeveled)
 }
 
-func (this *Dht) MessageChunks() map[string]*WaitingMsg {
-	return this.messageChunks
-}
+var (
+	pass  = pbkdf2.Key([]byte(cryptKey), []byte(cryptSalt), 4096, 32, sha1.New)
+	bc, _ = kcp.NewAESBlockCrypt(pass)
+)
 
-func (this *Dht) republish() {
-	for k, v := range this.store {
-		h, _ := hex.DecodeString(k)
-		this.StoreAt(h, v)
-	}
-
-	this.logger.Debug("Republished", len(this.store))
-}
-
-func (this *Dht) Store(value []byte) (Hash, int, error) {
-	return this.StoreAt(NewHash(value), value)
-}
-
-func (this *Dht) StoreAt(hash Hash, value []byte) (Hash, int, error) {
-	if len(value) > this.options.MaxItemSize {
-		return []byte{}, 0, errors.New("Store: Exceeds max limit")
-	}
-
-	bucket := this.fetchNodes(hash)
-
-	if len(bucket) == 0 {
-		return []byte{}, 0, errors.New("No nodes found")
-	}
-
-	fn := func(node *Node) chan interface{} {
-		return node.Store(hash, value)
-	}
-
-	query := NewQuery(hash, fn, this)
-
-	res, ok := query.Run().([]bool)
-
-	if !ok || len(res) == 0 {
-		return []byte{}, 0, errors.New("No answers from nodes")
-	}
-
-	storedOkNb := 0
-	for _, stored := range res {
-		if stored {
-			storedOkNb++
-		}
-	}
-
-	if storedOkNb == 0 {
-		return []byte{}, 0, errors.New(hex.EncodeToString(hash) + ": The key might be existing already")
-	}
-
-	return hash, storedOkNb, nil
-}
-
-func (this *Dht) Fetch(hash Hash) ([]byte, error) {
-	fn := func(node *Node) chan interface{} {
-		return node.Fetch(hash)
-	}
-
-	query := NewQuery(hash, fn, this)
-
-	res := query.Run()
-
-	switch res.(type) {
-	case []*Node:
-		return nil, errors.New("Not found")
-	case *Found:
-		found := res.(*Found)
-
-		return found.Header.Data, nil
-
-	default:
-	}
-
-	return nil, errors.New("Unknown fetched data")
-}
-
-func (this *Dht) fetchNodes(hash Hash) []*Node {
-	fn := func(node *Node) chan interface{} {
-		return node.FetchNodes(hash)
-	}
-
-	query := NewQuery(hash, fn, this)
-
-	return query.Run().([]*Node)
-}
-
-func (this *Dht) bootstrap() error {
-	this.logger.Debug("Connecting to bootstrap node", this.options.BootstrapAddr)
-
-	addr, err := net.ResolveUDPAddr("udp", this.options.BootstrapAddr)
-
-	if err != nil {
-		return err
-	}
-
-	bootstrapNode := NewNode(this, addr, []byte{})
-
-	// this.routing.AddNode(bootstrapNode.contact)
-
-	if err, hasErr := (<-bootstrapNode.Ping()).(error); hasErr {
-		return err
-	}
-
-	_ = this.fetchNodes(this.hash)
-
-	for i, bucket := range this.routing.buckets {
-		if len(bucket) != 0 {
-			continue
-		}
-
-		h := NewRandomHash()
-		h = this.routing.nCopy(h, this.hash, i)
-
-		_ = this.fetchNodes(h)
-	}
-
-	this.logger.Info("Ready...")
-
-	if this.options.Interactif {
-		go this.Cli()
-	}
-
-	return nil
-}
+const cryptKey = "rpcx-key"
+const cryptSalt = "rpcx-salt"
 
 func (this *Dht) Start() error {
 	if this.running {
@@ -254,23 +132,32 @@ func (this *Dht) Start() error {
 
 	this.logger.Info("Own hash", hex.EncodeToString(this.hash))
 
-	l, err := net.ListenPacket("udp", this.options.ListenAddr)
-
-	if err != nil {
-		return errors.New("Error listening:" + err.Error())
-	}
-
-	this.server = l
-
 	go func() {
-		this.logger.Info("Listening on " + this.options.ListenAddr)
-
-		if err := this.loop(); err != nil {
-			this.running = false
-			this.logger.Error("Main loop: " + err.Error())
+		log.SetDummyLogger()
+		this.server = server.NewServer(server.WithBlockCrypt(bc))
+		service := &Service{
+			Dht: this,
 		}
+
+		err := this.server.RegisterName("Service", service, "")
+
+		if err != nil {
+			fmt.Println("Error registering: " + err.Error())
+
+			return
+		}
+
+		err = this.server.Serve("kcp", this.options.ListenAddr)
+
+		if err != nil {
+			fmt.Println("Error listening: " + err.Error())
+
+			return
+		}
+
 	}()
 
+	this.logger.Info("Listening on " + this.options.ListenAddr)
 	this.running = true
 
 	if len(this.options.BootstrapAddr) > 0 {
@@ -282,34 +169,6 @@ func (this *Dht) Start() error {
 		if this.options.Interactif {
 			go this.Cli()
 		}
-	}
-
-	return nil
-}
-
-const BUFFER_SIZE = 1024 * 4
-
-func (this *Dht) loop() error {
-	this.running = true
-
-	defer this.server.Close()
-
-	// msgs := make(map[string][]UDPWrapper)
-
-	for this.running {
-		var message [BUFFER_SIZE]byte
-
-		n, addr, err := this.server.ReadFrom(message[0:])
-
-		if err != nil {
-			if this.running == false {
-				return nil
-			}
-
-			return errors.New("Error reading:" + err.Error())
-		}
-
-		go this.handleInPacket(addr, message[:n])
 	}
 
 	return nil
@@ -329,58 +188,30 @@ func (this *Dht) Stop() {
 	this.server.Close()
 }
 
-func (this *Dht) handleInPacket(addr net.Addr, blob []byte) {
-	var packet Packet
-
-	if err := proto.Unmarshal(blob, &packet); err != nil {
-		this.logger.Warning("Invalid packet", err)
-
-		return
-	}
-
-	var node *Node
-
-	addr, err := net.ResolveUDPAddr("udp", packet.Header.Sender.Addr)
-
-	if err != nil {
-		this.logger.Warning("Cannot resolve udp address")
-
-		return
-	}
-
-	node = NewNodeContact(this, addr, *packet.Header.Sender)
-
-	// this.logger.Info("Got packet", packet.Header.Sender.Addr)
-
-	this.routing.AddNode(*packet.Header.Sender)
-
-	node.HandleInPacket(packet)
-}
-
 func (this *Dht) Logger() *logging.Logger {
 	return this.logger
 }
 
-func (this *Dht) CustomCmd(data interface{}) {
-	bucket := this.routing.FindNode(this.hash)
+// func (this *Dht) CustomCmd(data interface{}) {
+// 	bucket := this.routing.FindNode(this.hash)
 
-	for _, contact := range bucket {
-		addr, _ := net.ResolveUDPAddr("udp", contact.Addr)
+// 	for _, contact := range bucket {
+// 		addr, _ := net.ResolveUDPAddr("udp", contact.Addr)
 
-		node := NewNodeContact(this, addr, contact)
-		<-node.Custom(data)
-	}
-}
+// 		node := NewNodeContact(this, addr, contact)
+// 		<-node.Custom(data)
+// 	}
+// }
 
-func (this *Dht) hasBroadcast(hash []byte) bool {
-	for _, h := range this.gotBroadcast {
-		if compare(h, hash) == 0 {
-			return true
-		}
-	}
+// func (this *Dht) hasBroadcast(hash []byte) bool {
+// 	for _, h := range this.gotBroadcast {
+// 		if compare(h, hash) == 0 {
+// 			return true
+// 		}
+// 	}
 
-	return false
-}
+// 	return false
+// }
 
 func compare(hash1, hash2 []byte) int {
 	if len(hash1) != len(hash2) {
@@ -396,35 +227,35 @@ func compare(hash1, hash2 []byte) int {
 	return 0
 }
 
-func (this *Dht) Broadcast(data interface{}) {
-	bucket := this.routing.FindNode(this.hash)
+// func (this *Dht) Broadcast(data interface{}) {
+// 	bucket := this.routing.FindNode(this.hash)
 
-	var packet Packet
-	switch data.(type) {
-	case Packet_Broadcast:
-		packet = data.(Packet)
-	case Packet:
-		packet = data.(Packet)
-	default:
-		// Fixme
-		h, err := msgpack.Marshal(data)
+// 	var packet Packet
+// 	switch data.(type) {
+// 	case Packet_Broadcast:
+// 		packet = data.(Packet)
+// 	case Packet:
+// 		packet = data.(Packet)
+// 	default:
+// 		// Fixme
+// 		h, err := msgpack.Marshal(data)
 
-		if err != nil {
-			this.logger.Error("Cannot broadcast")
+// 		if err != nil {
+// 			this.logger.Error("Cannot broadcast")
 
-			return
-		}
+// 			return
+// 		}
 
-		packet = NewPacket(this, Command_BROADCAST, []byte{}, &Packet_Broadcast{&Broadcast{h}})
-	}
+// 		packet = NewPacket(this, Command_BROADCAST, []byte{}, &Packet_Broadcast{&Broadcast{h}})
+// 	}
 
-	for _, contact := range bucket {
-		addr, _ := net.ResolveUDPAddr("udp", contact.Addr)
+// 	for _, contact := range bucket {
+// 		addr, _ := net.ResolveUDPAddr("udp", contact.Addr)
 
-		node := NewNodeContact(this, addr, contact)
-		node.Broadcast(packet)
-	}
-}
+// 		node := NewNodeContact(this, addr, contact)
+// 		node.Broadcast(packet)
+// 	}
+// }
 
 func (this *Dht) Running() bool {
 	return this.running
@@ -436,27 +267,27 @@ func (this *Dht) Wait() {
 	}
 }
 
-func (this *Dht) onCustomCmd(packet Packet) interface{} {
-	for _, m := range this.middlewares {
-		if res := m.OnCustomCmd(packet); res != nil {
-			return res
-		}
-	}
+// func (this *Dht) onCustomCmd(packet Packet) interface{} {
+// 	for _, m := range this.middlewares {
+// 		if res := m.OnCustomCmd(packet); res != nil {
+// 			return res
+// 		}
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
-func (this *Dht) onBroadcast(packet Packet) interface{} {
-	for _, m := range this.middlewares {
-		if res := m.OnBroadcast(packet); res != nil {
-			return res
-		}
-	}
+// func (this *Dht) onBroadcast(packet Packet) interface{} {
+// 	for _, m := range this.middlewares {
+// 		if res := m.OnBroadcast(packet); res != nil {
+// 			return res
+// 		}
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
-func (this *Dht) onStore(packet Packet) bool {
+func (this *Dht) onStore(packet StoreRequest) bool {
 	for _, m := range this.middlewares {
 		if res := m.OnStore(packet); res != true {
 			return res

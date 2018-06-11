@@ -1,11 +1,12 @@
 package dht
 
-import "sort"
+import (
+	"errors"
+	"sort"
+	"sync"
+)
 
-import "net"
-import "sync"
-
-type QueryJob func(*Node) chan interface{}
+type QueryJob func(*Node) *Response
 
 type Query struct {
 	sync.RWMutex
@@ -31,26 +32,25 @@ func NewQuery(hash []byte, job QueryJob, dht *Dht) *Query {
 	}
 }
 
-func (this *Query) Run() interface{} {
+func (this *Query) Run() *Response {
 	bucket := this.dht.routing.FindNode(this.hash)
 
 	if len(bucket) == 0 {
-		return []*Node{}
+		return &Response{
+			Err: errors.New("Not found"),
+		}
 	}
 
 	this.workerQueue.Start()
 
-	for _, contact := range bucket {
-		addr, _ := net.ResolveUDPAddr("udp", contact.Addr)
-
-		n := NewNodeContact(this.dht, addr, contact)
+	for _, node := range bucket {
 		this.Lock()
-		this.best = append(this.best, n)
-		this.blacklist = append(this.blacklist, n)
+		this.best = append(this.best, node)
+		this.blacklist = append(this.blacklist, node)
 		this.Unlock()
 
-		this.updateClosest(contact)
-		this.addToQueue(n)
+		this.updateClosest(node.Contact)
+		this.addToQueue(node)
 	}
 
 	return this.WaitResult()
@@ -72,50 +72,49 @@ func (this *Query) isCloser(contact PacketContact) bool {
 }
 
 func (this *Query) addToQueue(node *Node) {
-	this.workerQueue.Add(func() chan interface{} {
+	this.workerQueue.Add(func() *Response {
 		return this.job(node)
 	})
 }
 
-func (this *Query) WaitResult() interface{} {
+func (this *Query) WaitResult() *Response {
 	storeAnswers := []bool{}
 
 	for res := range this.workerQueue.Results {
-		switch res.(type) {
-		case error:
+		if res.Err != nil {
 			this.workerQueue.OnDone()
+
 			continue
+		}
 
-		case Packet:
-			packet := res.(Packet)
+		if len(res.Data) > 0 {
+			return res
+		}
 
-			switch packet.Header.Command {
-			case Command_FOUND:
-				return packet.GetFound()
-
-			case Command_STORED:
-				storeAnswers = append(storeAnswers, packet.GetOk())
-
-			case Command_FOUND_NODES:
-				toAdd := packet.GetFoundNodes().Nodes
-
-				for _, contact := range toAdd {
-					this.processContact(contact)
-				}
-
-			default:
+		if len(res.Contacts) > 0 {
+			for _, contact := range res.Contacts {
+				this.processContact(&contact)
 			}
-		default:
+		} else {
+			storeAnswers = append(storeAnswers, res.Ok)
 		}
 
 		this.workerQueue.OnDone()
 	}
 
 	if len(storeAnswers) > 0 {
-		return storeAnswers
+		return &Response{
+			Ok: true,
+		}
 	}
 
-	return this.best
+	res := &Response{}
+
+	for _, best := range this.best {
+		res.Contacts = append(res.Contacts, best.Contact)
+	}
+
+	return res
 }
 
 func (this *Query) processContact(contact *PacketContact) {
@@ -127,36 +126,27 @@ func (this *Query) processContact(contact *PacketContact) {
 		return
 	}
 
-	addr, err := net.ResolveUDPAddr("udp", contact.Addr)
+	n := NewNode(this.dht, *contact)
 
-	if err != nil {
-		return
-	}
-
-	n := NewNode(this.dht, addr, contact.Hash)
+	res := n.Ping()
 
 	this.Lock()
 	this.blacklist = append(this.blacklist, n)
 	this.Unlock()
 
-	// _, ok := (<-n.Ping()).(error)
-
-	// if ok {
-	// 	return
-	// }
+	if res.Err != nil {
+		return
+	}
 
 	this.tryAddToBest(n)
-
-	// if this.isCloser(n.contact) {
-	// }
 }
 
 func (this *Query) tryAddToBest(node *Node) {
 	this.addToQueue(node)
 
-	if this.isCloser(node.contact) {
+	if this.isCloser(node.Contact) {
 
-		this.updateClosest(node.contact)
+		this.updateClosest(node.Contact)
 
 		this.Lock()
 
@@ -176,7 +166,7 @@ func (this *Query) tryAddToBest(node *Node) {
 
 func (this *Query) sortByClosest(bucket []*Node) {
 	sort.Slice(bucket, func(i, j int) bool {
-		return this.dht.routing.distanceBetwin(bucket[i].contact.Hash, this.hash) < this.dht.routing.distanceBetwin(bucket[j].contact.Hash, this.hash)
+		return this.dht.routing.distanceBetwin(bucket[i].Contact.Hash, this.hash) < this.dht.routing.distanceBetwin(bucket[j].Contact.Hash, this.hash)
 	})
 }
 
@@ -193,7 +183,7 @@ func (this *Query) isContactBlacklisted(contact *PacketContact) bool {
 
 func (this *Query) contains(bucket []*Node, node *PacketContact) bool {
 	for _, n := range bucket {
-		if compare(node.Hash, n.contact.Hash) == 0 {
+		if compare(node.Hash, n.Contact.Hash) == 0 {
 			return true
 		}
 	}

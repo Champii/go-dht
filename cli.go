@@ -56,7 +56,7 @@ COPYRIGHT:
 		cli.StringFlag{
 			Name:  "l, listen",
 			Usage: "Listening address and port",
-			Value: ":3000",
+			Value: "localhost:3000",
 		},
 		cli.BoolFlag{
 			Name:  "i, interactif",

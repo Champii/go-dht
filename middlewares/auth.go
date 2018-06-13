@@ -5,9 +5,10 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
-	"go-dht/dht"
 	"math/big"
 	"time"
+
+	"github.com/champii/go-dht/dht"
 
 	logging "github.com/op/go-logging"
 	"github.com/vmihailenco/msgpack"

@@ -8,9 +8,10 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
-	"go-dht/dht"
 	"io/ioutil"
 	"os"
+
+	"github.com/champii/go-dht/dht"
 	// "strings"
 )
 

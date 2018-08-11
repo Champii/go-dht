@@ -3,13 +3,31 @@ package dht
 import (
 	"context"
 	"encoding/hex"
+
+	metrics "github.com/rcrowley/go-metrics"
 )
 
-type Service struct {
+var storeCounter = metrics.NewGauge()
+var storeAmount = metrics.NewGauge()
+
+type IService interface {
+	GetService() IService
+	Name() string
+}
+
+type DhtService struct {
 	Dht *Dht
 }
 
-func (this *Service) addNode(contact PacketContact) *Node {
+func (this *DhtService) GetService() *DhtService {
+	return this
+}
+
+func (this *DhtService) Name() string {
+	return "DhtService"
+}
+
+func (this *DhtService) addNode(contact PacketContact) *Node {
 	node, err := this.Dht.routing.GetByAddr(contact.Addr)
 
 	if err != nil && compare(contact.Hash, this.Dht.hash) != 0 {
@@ -21,7 +39,7 @@ func (this *Service) addNode(contact PacketContact) *Node {
 	return node
 }
 
-func (this *Service) Ping(ctx context.Context, req *PacketHeader, res *Response) error {
+func (this *DhtService) Ping(ctx context.Context, req *PacketHeader, res *Response) error {
 	node := this.addNode(req.Sender)
 
 	this.Dht.logger.Debug(node, "> PING")
@@ -35,7 +53,7 @@ func (this *Service) Ping(ctx context.Context, req *PacketHeader, res *Response)
 	return nil
 }
 
-func (this *Service) FetchNodes(ctx context.Context, req *FetchRequest, res *Response) error {
+func (this *DhtService) FetchNodes(ctx context.Context, req *FetchRequest, res *Response) error {
 	node := this.addNode(req.Header.Sender)
 
 	this.Dht.logger.Debug(node, "> FETCH NODES", hex.EncodeToString(req.Hash))
@@ -57,7 +75,7 @@ func (this *Service) FetchNodes(ctx context.Context, req *FetchRequest, res *Res
 	return nil
 }
 
-func (this *Service) Fetch(ctx context.Context, req *FetchRequest, res *Response) error {
+func (this *DhtService) Fetch(ctx context.Context, req *FetchRequest, res *Response) error {
 	node := this.addNode(req.Header.Sender)
 
 	this.Dht.logger.Debug(node, "> FETCH", hex.EncodeToString(req.Hash))
@@ -83,7 +101,7 @@ func (this *Service) Fetch(ctx context.Context, req *FetchRequest, res *Response
 	return nil
 }
 
-func (this *Service) Store(ctx context.Context, req *StoreRequest, res *Response) error {
+func (this *DhtService) Store(ctx context.Context, req *StoreRequest, res *Response) error {
 	node := this.addNode(req.Header.Sender)
 
 	this.Dht.logger.Debug(node, "> STORE", hex.EncodeToString(req.Hash), len(req.Data))
@@ -106,11 +124,31 @@ func (this *Service) Store(ctx context.Context, req *StoreRequest, res *Response
 
 	this.Dht.Lock()
 	this.Dht.store[hex.EncodeToString(req.Hash)] = req.Data
+
+	metrics.GetOrRegister("storedElements", storeCounter)
+	metrics.GetOrRegister("storedAmount", storeAmount)
+	storeCounter.Update(int64(len(this.Dht.store)))
 	this.Dht.Unlock()
+
+	storeAmount.Update(int64(this.Dht.StorageSize() / 1024))
 
 	res.Ok = true
 
 	this.Dht.logger.Debug(node, "< STORED", hex.EncodeToString(req.Hash))
+
+	return nil
+}
+
+func (this *DhtService) CustomCmd(ctx context.Context, req *CustomRequest, res *CustomResponse) error {
+	*res = *NewEmptyCustomResponse(this.Dht)
+
+	resData, err := this.Dht.onCustomCmd(req.Data)
+
+	if err != nil {
+		return err
+	}
+
+	res.Data = resData
 
 	return nil
 }

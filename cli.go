@@ -85,7 +85,7 @@ COPYRIGHT:
 		},
 		cli.IntFlag{
 			Name:  "v, verbose",
-			Value: 3,
+			Value: 2,
 			Usage: "Verbose `level`, 0 for CRITICAL and 5 for DEBUG",
 		},
 	}

@@ -68,7 +68,7 @@ func (this *Query) isCloser(contact PacketContact) bool {
 	this.RLock()
 	defer this.RUnlock()
 
-	return this.dht.routing.distanceBetwin(contact.Hash, this.hash) < this.dht.routing.distanceBetwin(this.closest, this.hash)
+	return this.dht.routing.DistanceBetwin(contact.Hash, this.hash) < this.dht.routing.DistanceBetwin(this.closest, this.hash)
 }
 
 func (this *Query) addToQueue(node *Node) {
@@ -166,7 +166,7 @@ func (this *Query) tryAddToBest(node *Node) {
 
 func (this *Query) sortByClosest(bucket []*Node) {
 	sort.Slice(bucket, func(i, j int) bool {
-		return this.dht.routing.distanceBetwin(bucket[i].Contact.Hash, this.hash) < this.dht.routing.distanceBetwin(bucket[j].Contact.Hash, this.hash)
+		return this.dht.routing.DistanceBetwin(bucket[i].Contact.Hash, this.hash) < this.dht.routing.DistanceBetwin(bucket[j].Contact.Hash, this.hash)
 	})
 }
 

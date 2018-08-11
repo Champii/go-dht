@@ -48,7 +48,7 @@ func (this *Node) Ping() *Response {
 	req := NewHeader(this.Dht)
 	res := &Response{}
 
-	err := this.Client.Call(context.Background(), "Service", "Ping", &req, res)
+	err := this.Client.Call(context.Background(), "DhtService", "Ping", &req, res)
 
 	if err != nil {
 		res.Err = err
@@ -60,7 +60,7 @@ func (this *Node) Ping() *Response {
 		return res
 	}
 
-	this.afterResponse(res)
+	this.afterResponse(&res.Header)
 
 	this.Dht.logger.Debug(this, "> PONG")
 
@@ -75,7 +75,7 @@ func (this *Node) FetchNodes(hash []byte) *Response {
 	req := NewFetchRequest(this.Dht, hash)
 	res := &Response{}
 
-	err := this.Client.Call(context.Background(), "Service", "FetchNodes", req, res)
+	err := this.Client.Call(context.Background(), "DhtService", "FetchNodes", req, res)
 
 	if err != nil {
 		res.Err = err
@@ -89,7 +89,7 @@ func (this *Node) FetchNodes(hash []byte) *Response {
 
 	this.Dht.logger.Debug(this, "> FOUND NODES", len(res.Contacts))
 
-	this.afterResponse(res)
+	this.afterResponse(&res.Header)
 
 	return res
 }
@@ -102,7 +102,7 @@ func (this *Node) Fetch(hash []byte) *Response {
 	req := NewFetchRequest(this.Dht, hash)
 	res := &Response{}
 
-	err := this.Client.Call(context.Background(), "Service", "Fetch", req, res)
+	err := this.Client.Call(context.Background(), "DhtService", "Fetch", req, res)
 
 	if err != nil {
 		res.Err = err
@@ -120,7 +120,7 @@ func (this *Node) Fetch(hash []byte) *Response {
 		this.Dht.logger.Debug(this, "> FOUND", hex.EncodeToString(hash), len(res.Data))
 	}
 
-	this.afterResponse(res)
+	this.afterResponse(&res.Header)
 
 	return res
 }
@@ -135,7 +135,7 @@ func (this *Node) Store(hash []byte, data []byte) *Response {
 
 	this.Dht.logger.Debug(this, "< STORE", hex.EncodeToString(hash), len(req.Data))
 
-	err := this.Client.Call(context.Background(), "Service", "Store", req, res)
+	err := this.Client.Call(context.Background(), "DhtService", "Store", req, res)
 
 	if err != nil {
 		res.Err = err
@@ -153,13 +153,44 @@ func (this *Node) Store(hash []byte, data []byte) *Response {
 		this.Dht.logger.Debug(this, "> NOT STORED", hex.EncodeToString(hash))
 	}
 
-	this.afterResponse(res)
+	this.afterResponse(&res.Header)
 
 	return res
 }
 
-func (this *Node) afterResponse(res *Response) {
-	this.Contact = res.Header.Sender
+func (this *Node) CustomCmd(data interface{}) *CustomResponse {
+	this.Connect()
+
+	req := NewCustomRequest(this.Dht, data)
+	res := &CustomResponse{}
+
+	this.Dht.logger.Debug(this, "< CUSTOM CMD")
+
+	err := this.Client.Call(context.Background(), "DhtService", "CustomCmd", req, res)
+
+	if err != nil {
+		res.Err = err
+
+		this.Dht.logger.Debug(this, "! ", res.Err)
+
+		this.Dht.routing.RemoveNode(this)
+
+		return res
+	}
+
+	if res.Ok {
+		this.Dht.logger.Debug(this, "> CUSTOM CMD OK")
+	} else {
+		this.Dht.logger.Debug(this, "> CUSTOM CMD NOT OK")
+	}
+
+	this.afterResponse(&res.Header)
+
+	return res
+}
+
+func (this *Node) afterResponse(res *PacketHeader) {
+	this.Contact = res.Sender
 
 	if compare(this.Contact.Hash, this.Dht.hash) == 0 {
 		return

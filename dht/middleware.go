@@ -2,9 +2,10 @@ package dht
 
 type IMiddleware interface {
 	Init(*Dht) error
+	OnAddNode(*Node) bool
 	BeforeSendStore(*StoreRequest) *StoreRequest
 	OnStore(*StoreRequest) bool
-	// OnCustomCmd(Packet) interface{}
+	OnCustomCmd(interface{}) (interface{}, error)
 	// OnBroadcast(Packet) interface{}
 }
 

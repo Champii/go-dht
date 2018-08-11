@@ -1,13 +1,14 @@
 package middleware
 
 import (
+	"babble/crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
-	"encoding/hex"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
 
@@ -29,6 +30,10 @@ func (this *Key) Pub() []byte {
 	return this.pub
 }
 
+func (this *Key) Priv() *ecdsa.PrivateKey {
+	return this.key
+}
+
 type KeyOpt struct {
 	Folder string
 }
@@ -37,7 +42,9 @@ func (this *AuthMiddleware) GetKeys(options KeyOpt) error {
 	keys, err := ioutil.ReadDir(options.Folder + "/keys")
 
 	if err != nil {
-		return err
+		if err := os.MkdirAll(options.Folder+"/keys", 0755); err != nil {
+			return err
+		}
 	}
 
 	for _, key := range keys {
@@ -49,7 +56,7 @@ func (this *AuthMiddleware) GetKeys(options KeyOpt) error {
 			return err
 		}
 
-		block, _ := pem.Decode([]byte(blob))
+		block, _ := pem.Decode(blob)
 		x509Encoded := block.Bytes
 		privateKey, err := x509.ParseECPrivateKey(x509Encoded)
 
@@ -75,7 +82,7 @@ func (this *AuthMiddleware) GetKeys(options KeyOpt) error {
 		this.Keys[key.Name()] = &Key{
 			name: key.Name(),
 			key:  privateKey,
-			pub:  pemEncodedPub,
+			pub:  crypto.FromECDSAPub(&privateKey.PublicKey),
 		}
 
 	}
@@ -120,6 +127,7 @@ func (this *AuthMiddleware) CreateKey(name string, options KeyOpt) (*Key, error)
 	if err != nil {
 		return nil, err
 	}
+
 	pemEncodedPub := pem.EncodeToMemory(&pem.Block{
 		Type:  "PUBLIC KEY",
 		Bytes: x509EncodedPub,
@@ -135,13 +143,14 @@ func (this *AuthMiddleware) CreateKey(name string, options KeyOpt) (*Key, error)
 
 	this.Logger.Info("Created key", name+".key", SanitizePubKey(pemEncodedPub))
 
+	fmt.Println("OUECH", pemEncoded)
 	return &Key{
 		name: name + ".key",
 		key:  key,
-		pub:  pemEncodedPub,
+		pub:  crypto.FromECDSAPub(&key.PublicKey),
 	}, nil
 }
 
 func SanitizePubKey(pub []byte) string {
-	return hex.EncodeToString(dht.NewHash(pub))
+	return dht.NewHash(pub).String()
 }

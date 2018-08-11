@@ -21,17 +21,35 @@ the network to bend it to its needs.
 Also, it allows to build a protocol on top of its own with `CustomCmd`, and to
 `Broadcast` a packet to the whole network (BETA)
 
+## Build
+
+This software use `rpcx` with `kcp` support.
+
+In order to build `go-dht`, you have to use the corresponding flag:
+
+```bash
+$> go build -tags "kcp"
+```
+
+If you forget it, you should have the following error:
+```bash
+# github.com/champii/go-dht/dht
+../github.com/champii/go-dht/dht/dht.go:160:34: undefined: server.WithBlockCrypt
+Exception: go exited with 2
+[tty], line 1: go build
+```
+
+
 ## Basics
 
 ### Launch a network of 3 nodes (including a bootstrap node) with default options and a little verbose:
 
 ```bash
 bash> ./go-dht -n 3 -v 4
-19:45:57.136 ▶ INFO 001 Listening on :3000
-19:45:58.136 ▶ INFO 002 Listening on :3001
-19:45:58.137 ▶ INFO 003 Ready...
-19:45:58.236 ▶ INFO 004 Listening on :3002
-19:45:58.240 ▶ INFO 005 Ready...
+23:38:32 ▶ NOTI 001 [ DHT ]                       - Listening on localhost:3000
+23:38:33 ▶ NOTI 002 [ DHT ]                       - Listening on localhost:3001
+23:38:33 ▶ NOTI 003 [ DHT ]                       - Listening on localhost:3002
+23:38:33 ▶ NOTI 004 [ DHT ]                       - Listening on localhost:3003
 
 ```
 
@@ -92,7 +110,7 @@ func main() {
 
 	client.Start()
 
-	hash, _, _ := client.Store([]byte("Some value"))
+	hash, _ := client.Store([]byte("Some value"))
 
 	value, _ := client.Fetch(hash)
 
@@ -136,8 +154,8 @@ func New(DhtOptions) *Dht
 func (*Dht) Start() error
 func (*Dht) Stop()
 
-func (*Dht) Store([]byte) (Hash, int, error)
-func (*Dht) StoreAt(Hash, []byte) (Hash, int, error)
+func (*Dht) Store([]byte) (Hash, error)
+func (*Dht) StoreAt(Hash, []byte) (Hash, error)
 
 func (*Dht) Fetch(Hash) ([]byte, error)
 
@@ -166,7 +184,6 @@ in coordination with `OnStore` callback, which can decide if the content is to b
 
 ## Todo
 
-- Fix this `Unknown response` error with same ResponseTo in some cases
 - Announce store before actually send to avoid sending data a node can't store
 - Store on disk
 - Storage spread when high demand (with timeout decay with distance over best storage)

@@ -31,6 +31,7 @@ type AuthMiddleware struct {
 	Dht    *dht.Dht
 	Logger *logging.Logger
 	Keys   map[string]*Key
+	Folder string
 }
 
 func (this *AuthMiddleware) Init(d *dht.Dht) error {
@@ -38,9 +39,13 @@ func (this *AuthMiddleware) Init(d *dht.Dht) error {
 	this.Dht = d
 	this.Logger = d.Logger()
 
-	this.CreateKey("main", KeyOpt{"."})
+	this.CreateKey("main", KeyOpt{this.Folder})
 
-	return this.GetKeys(KeyOpt{"."})
+	return this.GetKeys(KeyOpt{this.Folder})
+}
+
+func (this *AuthMiddleware) OnAddNode(*dht.Node) bool {
+	return true
 }
 
 func (this *AuthMiddleware) BeforeSendStore(req *dht.StoreRequest) *dht.StoreRequest {
@@ -144,10 +149,6 @@ func (this *AuthMiddleware) OnStore(req *dht.StoreRequest) bool {
 	return true
 }
 
-// func (this *AuthMiddleware) OnCustomCmd(dht.Packet) interface{} {
-// 	return nil
-// }
-
-// func (this *AuthMiddleware) OnBroadcast(dht.Packet) interface{} {
-// 	return nil
-// }
+func (this *AuthMiddleware) OnCustomCmd(data interface{}) (interface{}, error) {
+	return data, nil
+}

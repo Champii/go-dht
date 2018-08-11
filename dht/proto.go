@@ -7,13 +7,14 @@ type Request interface {
 }
 
 type PacketContact struct {
-	Hash []byte
+	Hash Hash
 	Addr string
 }
 
 type PacketHeader struct {
 	DateSent time.Time
 	Sender   PacketContact
+	MsgHash  string // maybe []byte here
 }
 
 type FetchRequest struct {
@@ -35,12 +36,28 @@ func (this StoreRequest) GetRequest() {
 
 }
 
+type CustomRequest struct {
+	Header PacketHeader
+	Data   interface{}
+}
+
+func (this CustomRequest) GetRequest() {
+
+}
+
 type Response struct {
 	Header   PacketHeader
 	Contacts []PacketContact
 	Data     []byte
 	Ok       bool
 	Err      error
+}
+
+type CustomResponse struct {
+	Header PacketHeader
+	Data   interface{}
+	Ok     bool
+	Err    error
 }
 
 func NewHeader(d *Dht) PacketHeader {
@@ -68,8 +85,21 @@ func NewStoreRequest(d *Dht, hash []byte, data []byte) *StoreRequest {
 	}
 }
 
+func NewCustomRequest(d *Dht, data interface{}) *CustomRequest {
+	return &CustomRequest{
+		Header: NewHeader(d),
+		Data:   data,
+	}
+}
+
 func NewEmptyResponse(d *Dht) *Response {
 	return &Response{
+		Header: NewHeader(d),
+	}
+}
+
+func NewEmptyCustomResponse(d *Dht) *CustomResponse {
+	return &CustomResponse{
 		Header: NewHeader(d),
 	}
 }

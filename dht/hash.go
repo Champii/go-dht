@@ -11,6 +11,14 @@ const (
 	BUCKET_SIZE = HASH_SIZE / 8
 )
 
+type Hashed string
+
+func (this Hashed) Bytes() []byte {
+	res, _ := hex.DecodeString(string(this))
+
+	return res
+}
+
 type Hash []byte
 
 func (this Hash) Redacted() interface{} {
@@ -19,6 +27,10 @@ func (this Hash) Redacted() interface{} {
 	}
 
 	return hex.EncodeToString(this)[:16]
+}
+
+func (this Hash) String() string {
+	return hex.EncodeToString(this)
 }
 
 func NewHash(val []byte) Hash {

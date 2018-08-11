@@ -4,14 +4,21 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"math/rand"
+	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/smallnest/rpcx/log"
+	"github.com/deathowl/go-metrics-prometheus"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	metrics "github.com/rcrowley/go-metrics"
+	rpcxlog "github.com/smallnest/rpcx/log"
 	"github.com/smallnest/rpcx/server"
+	"github.com/smallnest/rpcx/serverplugin"
 	kcp "github.com/xtaci/kcp-go"
 	"golang.org/x/crypto/pbkdf2"
 
@@ -29,6 +36,7 @@ type Dht struct {
 	server       *server.Server
 	gotBroadcast [][]byte
 	middlewares  []IMiddleware
+	services     map[string]IService
 }
 
 type DhtOptions struct {
@@ -41,6 +49,7 @@ type DhtOptions struct {
 	Interactif        bool
 	MaxStorageSize    int
 	MaxItemSize       int
+	Hash              []byte
 }
 
 func New(options DhtOptions) *Dht {
@@ -53,28 +62,29 @@ func New(options DhtOptions) *Dht {
 	}
 
 	res := &Dht{
-		routing: NewRouting(),
-		options: options,
-		running: false,
-		store:   make(map[string][]byte),
-		logger:  logging.MustGetLogger("dht"),
+		routing:  NewRouting(),
+		options:  options,
+		running:  false,
+		store:    make(map[string][]byte),
+		services: make(map[string]IService),
+		logger:   logging.MustGetLogger("dht"),
 	}
 
 	initLogger(res)
 
 	res.routing.dht = res
 
-	res.logger.Debug("DHT version 0.0.1")
+	res.logger.Info("v0.0.1")
 
 	return res
 }
 
 func initLogger(dht *Dht) {
 	var format = logging.MustStringFormatter(
-		`%{color}%{time:15:04:05.000} ▶ %{level:.4s} %{id:03x}%{color:reset} %{message}`,
+		`%{color}%{time:15:04:05} ▶ %{level:.4s} %{id:03x} [ DHT ]                       -%{color:reset} %{message}`,
 	)
 
-	backend := logging.NewLogBackend(os.Stderr, "", 0)
+	backend := logging.NewLogBackend(os.Stdout, "", 0)
 
 	var logLevel logging.Level
 	switch dht.options.Verbose {
@@ -101,6 +111,7 @@ func initLogger(dht *Dht) {
 	backendLeveled.SetLevel(logLevel, "")
 
 	logging.SetBackend(backendLeveled)
+
 }
 
 var (
@@ -111,12 +122,26 @@ var (
 const cryptKey = "rpcx-key"
 const cryptSalt = "rpcx-salt"
 
+func (this *Dht) AddService(service IService) {
+	this.services[service.Name()] = service
+}
+
+func (this *Dht) SetHash(hash []byte) {
+	if len(hash) > 0 {
+		this.hash = hash
+	} else {
+		this.hash = NewRandomHash()
+	}
+}
+
 func (this *Dht) Start() error {
 	if this.running {
 		return errors.New("Already started")
 	}
 
-	this.hash = NewRandomHash()
+	if len(this.hash) == 0 {
+		this.SetHash([]byte{})
+	}
 
 	r := rand.Intn(60) - 60
 	timer := time.NewTicker(time.Minute*10 + (time.Second * time.Duration(r)))
@@ -130,31 +155,53 @@ func (this *Dht) Start() error {
 	this.logger.Info("Own hash", hex.EncodeToString(this.hash))
 
 	go func() {
-		log.SetDummyLogger()
+		rpcxlog.SetDummyLogger()
+
 		this.server = server.NewServer(server.WithBlockCrypt(bc))
-		service := &Service{
+
+		p := serverplugin.NewMetricsPlugin(metrics.DefaultRegistry)
+
+		this.server.Plugins.Add(p)
+
+		this.startMetrics()
+
+		service := &DhtService{
 			Dht: this,
 		}
 
-		err := this.server.RegisterName("Service", service, "")
+		this.logger.Info("Registering Main Service:", "DhtService")
+
+		err := this.server.RegisterName("DhtService", service, "")
 
 		if err != nil {
-			fmt.Println("Error registering: " + err.Error())
+			this.logger.Error("Error registering: " + err.Error())
 
 			return
+		}
+
+		for name, serv := range this.services {
+			this.logger.Info("Registering Service:", name)
+			err := this.server.RegisterName(name, serv, "")
+
+			if err != nil {
+				this.logger.Error("Error registering: " + err.Error())
+
+				return
+			}
+
 		}
 
 		err = this.server.Serve("kcp", this.options.ListenAddr)
 
 		if err != nil {
-			fmt.Println("Error listening: " + err.Error())
+			this.logger.Error("Error listening: " + err.Error())
 
 			return
 		}
 
 	}()
 
-	this.logger.Info("Listening on " + this.options.ListenAddr)
+	this.logger.Notice("Listening on " + this.options.ListenAddr)
 	this.running = true
 
 	if len(this.options.BootstrapAddr) > 0 {
@@ -169,6 +216,33 @@ func (this *Dht) Start() error {
 	}
 
 	return nil
+}
+
+func (this *Dht) startMetrics() {
+	addrSplited := strings.Split(this.options.ListenAddr, ":")
+	p, err := strconv.Atoi(addrSplited[1])
+	pStr := strconv.Itoa(p + 1000)
+
+	addr := addrSplited[0] + ":" + pStr
+
+	prometheusRegistry := prometheus.NewRegistry()
+
+	pClient := prometheusmetrics.NewPrometheusProvider(metrics.DefaultRegistry, "dht", addr, prometheusRegistry, 1*time.Second)
+	go pClient.UpdatePrometheusMetrics()
+
+	go func() {
+
+		if err != nil {
+			this.logger.Error("Cannot get metrics port")
+
+			return
+		}
+
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.HandlerFor(prometheusRegistry, promhttp.HandlerOpts{}))
+		this.logger.Fatal(http.ListenAndServe(addr, mux))
+
+	}()
 }
 
 func (this *Dht) Stop() {
@@ -309,6 +383,21 @@ func (this *Dht) onStore(packet *StoreRequest) bool {
 	return true
 }
 
+func (this *Dht) onCustomCmd(data interface{}) (interface{}, error) {
+	//todo: perfs
+	for _, m := range reverse(this.middlewares) {
+		res, err := m.OnCustomCmd(data)
+
+		if err != nil {
+			return nil, err
+		}
+
+		data = res
+	}
+
+	return data, nil
+}
+
 func (this *Dht) beforeSendStore(packet *StoreRequest) *StoreRequest {
 	for _, m := range this.middlewares {
 		if res := m.BeforeSendStore(packet); res != nil {
@@ -317,6 +406,16 @@ func (this *Dht) beforeSendStore(packet *StoreRequest) *StoreRequest {
 	}
 
 	return packet
+}
+
+func (this *Dht) onAddNode(node *Node) bool {
+	for _, m := range this.middlewares {
+		if !m.OnAddNode(node) {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (this *Dht) GetConnectedNumber() int {
@@ -329,6 +428,18 @@ func (this *Dht) StoredKeys() int {
 
 func (this *Dht) Storage() map[string][]byte {
 	return this.store
+}
+
+func (this *Dht) Routing() *Routing {
+	return this.routing
+}
+
+func (this *Dht) GetHash() []byte {
+	return this.hash
+}
+
+func (this *Dht) GetHexHash() string {
+	return hex.EncodeToString(this.hash)
 }
 
 func (this *Dht) StorageSize() int {
@@ -345,4 +456,8 @@ func (this *Dht) StorageSize() int {
 
 func Compare(a []byte, b []byte) int {
 	return compare(a, b)
+}
+
+func (this *Dht) GetCloseGroup() []*Node {
+	return this.routing.FindNode(this.hash)
 }
